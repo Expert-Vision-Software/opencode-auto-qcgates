@@ -1,0 +1,40 @@
+{
+  "name": "opencode-auto-qcgates",
+  "version": "1.0.0",
+  "description": "Test execution, baseline management, and threshold evaluation for quality gates.",
+  "type": "module",
+  "module": "index.ts",
+  "main": "plugin.ts",
+  "bin": {
+    "opencode-auto-qcgates": "index.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Expert-Vision-Software/opencode-auto-qcgates.git"
+  },
+  "publisher": "Expert Vision Software",
+  "author": "Expert Vision Support <support@expertvision.software>",
+  "bugs": {
+    "url": "https://github.com/Expert-Vision-Software/opencode-auto-qcgates/issues",
+    "email": "support@expertvisionsoftware.com"
+  },
+  "files": [
+    "index.ts",
+    "plugin.ts",
+    "src",
+    "assets"
+  ],
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "keywords": ["opencode", "testing", "baselining", "quality-gates"],
+  "license": "MIT",
+  "dependencies": {
+    "@opencode-ai/plugin": "*"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.7.0"
+  }
+}
