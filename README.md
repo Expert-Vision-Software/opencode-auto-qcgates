@@ -18,30 +18,16 @@ Add to `.opencode/opencode.json` in your project:
 
 ```json
 {
-  "plugin": ["opencode-auto-qcgates"]
+  "plugin": ["github:expert-vision-software/opencode-auto-qcgates"]
 }
 ```
 
-OpenCode will resolve the plugin from npm on first run.
+OpenCode resolves the plugin from npm automatically.
 
-For local development with a file path:
-
-```json
-{
-  "plugin": ["file:///path/to/opencode-auto-qcgates"]
-}
-```
-
-### Option 2: CLI
+### Option 2: bunx
 
 ```bash
-opencode plugin add opencode-auto-qcgates
-```
-
-For a local checkout:
-
-```bash
-opencode plugin add file:///path/to/opencode-auto-qcgates
+bunx opencode-auto-qcgates install
 ```
 
 ## Uninstall
@@ -49,7 +35,7 @@ opencode plugin add file:///path/to/opencode-auto-qcgates
 Remove the plugin entry from `.opencode/opencode.json`, or run:
 
 ```bash
-opencode plugin remove opencode-auto-qcgates
+opencode plugin remove "expert-vision-software/opencode-auto-qcgates"
 ```
 
 ## Usage
