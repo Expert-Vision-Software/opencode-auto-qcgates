@@ -1,6 +1,7 @@
 import type { Plugin } from "@opencode-ai/plugin";
 import { install } from "./src/installer.ts";
 
+const CHANGE_THRESHOLD = 3;
 const IGNORED_EXTENSIONS = [".md", ".json", ".yaml", ".yml", ".txt", ".lock"];
 const IGNORED_PATHS = [".opencode/", "node_modules/", ".git/"];
 
@@ -10,8 +11,7 @@ function isCodeChange(filePath: string): boolean {
   return !IGNORED_PATHS.some((ignored) => filePath.includes(ignored));
 }
 
-let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-const DEBOUNCE_MS = 2000;
+let changedFiles: string[] = [];
 
 const plugin: Plugin = async ({ directory, client }) => ({
   config: async () => {
@@ -19,12 +19,14 @@ const plugin: Plugin = async ({ directory, client }) => ({
   },
   event: async ({ event }) => {
     if (event.type === "file.edited" && isCodeChange(event.properties.file)) {
-      if (debounceTimer) clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(async () => {
-        await client.tui.executeCommand({
-          body: { command: "/test-baseline eval" },
-        });
-      }, DEBOUNCE_MS);
+      changedFiles.push(event.properties.file);
+    } else if (event.type === "session.idle" && changedFiles.length >= CHANGE_THRESHOLD) {
+      await client.tui.executeCommand({
+        body: { command: "/test-baseline eval" },
+      });
+      changedFiles = [];
+    } else if (event.type === "session.idle") {
+      changedFiles = [];
     }
   },
 });
