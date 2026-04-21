@@ -4,9 +4,6 @@ import { join } from "node:path";
 
 export type Scope = "local" | "global";
 
-const SKILL_NAME = "test-baselining";
-const COMMAND_NAME = "test-baseline.md";
-
 export function getGlobalConfigPath(): string {
   const xdgConfig = process.env.XDG_CONFIG_HOME;
   if (xdgConfig) {
@@ -53,18 +50,34 @@ async function writeJsonConfig(path: string, config: Record<string, unknown>): P
 export async function install(scope: Scope, projectDir: string = process.cwd()): Promise<void> {
   const pkgDir = getPackageDir();
   const configBase = scope === "global" ? getGlobalConfigPath() : getLocalConfigPath(projectDir);
-  const skillPath = join(configBase, "skills", SKILL_NAME);
-  const commandPath = join(configBase, "commands", COMMAND_NAME);
 
-  const assetsSkillPath = join(pkgDir, "assets", "skills", SKILL_NAME);
-  const assetsCommandPath = join(pkgDir, "assets", "commands", COMMAND_NAME);
+  const assetsSkillsPath = join(pkgDir, "assets", "skills");
+  const assetsCommandsPath = join(pkgDir, "assets", "commands");
+  const assetsAgentsPath = join(pkgDir, "assets", "agents");
 
-  if (await exists(assetsSkillPath)) {
-    await copyDir(assetsSkillPath, skillPath);
+  if (await exists(assetsSkillsPath)) {
+    for (const entry of await readdir(assetsSkillsPath, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        await copyDir(join(assetsSkillsPath, entry.name), join(configBase, "skills", entry.name));
+      }
+    }
   }
 
-  if (await exists(assetsCommandPath)) {
+  if (await exists(assetsCommandsPath)) {
     await mkdir(join(configBase, "commands"), { recursive: true });
-    await Bun.write(commandPath, Bun.file(assetsCommandPath));
+    for (const entry of await readdir(assetsCommandsPath, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name.endsWith(".md")) {
+        await Bun.write(join(configBase, "commands", entry.name), Bun.file(join(assetsCommandsPath, entry.name)));
+      }
+    }
+  }
+
+  if (await exists(assetsAgentsPath)) {
+    await mkdir(join(configBase, "agents"), { recursive: true });
+    for (const entry of await readdir(assetsAgentsPath, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        await copyDir(join(assetsAgentsPath, entry.name), join(configBase, "agents", entry.name));
+      }
+    }
   }
 }
