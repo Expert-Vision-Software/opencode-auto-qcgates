@@ -34,7 +34,8 @@
     "@opencode-ai/plugin": "*"
   },
   "devDependencies": {
+    "@types/node": "latest",
     "@types/bun": "latest",
-    "typescript": "^5.7.0"
+    "typescript": "latest"
   }
 }
