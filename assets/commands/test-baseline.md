@@ -1,6 +1,7 @@
 ---
 description: Test baselining workflow (init|eval|update)
 agent: explore
+subtask: true
 ---
 
 Load the test-baselining skill and execute the specified command:

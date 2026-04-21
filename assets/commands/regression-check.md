@@ -1,6 +1,7 @@
 ---
 description: Regression checking workflow
 agent: explore
+subtask: true
 ---
 
 Load the regression-checking skill to perform a quality regression check:
