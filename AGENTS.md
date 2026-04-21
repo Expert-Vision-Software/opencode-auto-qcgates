@@ -9,6 +9,7 @@ OpenCode plugin for automated quality gate evaluation via test baselining.
 | `/test-baseline eval` | Evaluate tests against baseline (DEFAULT) |
 | `/test-baseline init` | Create new baseline |
 | `/test-baseline update` | Update baseline if PASS and thresholds exceeded |
+| `/regression-check` | Quality regression check (proactive/reactive) |
 
 ## Developer Commands
 
@@ -20,9 +21,11 @@ bun test       # Run unit tests
 ## Architecture
 
 - `plugin.ts` — Plugin entry point; copies skill/command assets to `.opencode/` on first load
-- `src/installer.ts` — Asset installation logic (copies `assets/skills/test-baselining/` and `assets/commands/test-baseline.md`)
-- `assets/skills/test-baselining/SKILL.md` — Skill definition
-- `assets/commands/test-baseline.md` — Command definition
+- `src/installer.ts` — Asset installation logic (copies `assets/skills/` and `assets/commands/`)
+- `assets/skills/test-baselining/SKILL.md` — Test execution and baseline management skill
+- `assets/skills/regression-checking/SKILL.md` — Quality regression decision support skill
+- `assets/commands/test-baseline.md` — Test baselining command
+- `assets/commands/regression-check.md` — Regression checking command
 
 ## Installation
 
