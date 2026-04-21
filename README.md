@@ -129,7 +129,7 @@ When tests fail:
 
 ## Configuration
 
-The plugin uses `testing-baseline.xml` for baseline storage and `testing-protocol.md` for workflow definitions. See `docs/instructions/testing-protocol.md` for detailed configuration options.
+The plugin uses `testing-baseline.xml` for baseline storage and `testing-protocol.md` for workflow definitions. See `assets/skills/test-baselining/templates/testing-protocol.md` for detailed configuration options.
 
 ## Architecture
 
