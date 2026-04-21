@@ -34,4 +34,9 @@ In `.opencode/opencode.json`:
 
 ## Baseline Storage
 
-Baseline metrics stored in `@testing-baseline.xml` at project root.
+After `init`, the following files are created at the project root:
+
+| File | Description |
+|------|-------------|
+| `testing-protocol.md` | Protocol definition with execution workflow, thresholds, and decision logic |
+| `testing-baseline.xml` | Baseline metrics and changelog |
