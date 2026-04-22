@@ -1,6 +1,6 @@
 {
   "name": "opencode-auto-qcgates",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Test execution, baseline management, and threshold evaluation for quality gates.",
   "type": "module",
   "module": "index.ts",
