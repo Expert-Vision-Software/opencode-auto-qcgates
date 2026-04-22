@@ -1,12 +1,12 @@
 {
   "name": "opencode-auto-qcgates",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Test execution, baseline management, and threshold evaluation for quality gates.",
   "type": "module",
   "module": "index.ts",
   "main": "plugin.ts",
   "bin": {
-    "opencode-auto-qcgates": "index.ts"
+    "opencode-auto-qcgates": "./src/cli.ts"
   },
   "repository": {
     "type": "git",
@@ -31,6 +31,7 @@
   "keywords": ["opencode", "testing", "baselining", "quality-gates"],
   "license": "MIT",
   "dependencies": {
+    "@inquirer/prompts": "^8.3.0",
     "@opencode-ai/plugin": "*"
   },
   "devDependencies": {
