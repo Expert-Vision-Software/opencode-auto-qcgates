@@ -227,6 +227,7 @@ export async function install(
   const skillPaths: string[] = [];
   const commandPaths: string[] = [];
 
+  const version = await getPackageVersion();
   const assetsSkillsPath = join(pkgDir, "assets", "skills");
   const assetsCommandsPath = join(pkgDir, "assets", "commands");
   const assetsAgentsPath = join(pkgDir, "assets", "agents");
@@ -237,6 +238,7 @@ export async function install(
       if (entry.isDirectory()) {
         const destPath = join(configBase, "skills", entry.name);
         await copyDir(join(assetsSkillsPath, entry.name), destPath);
+        await Bun.write(join(destPath, ".version"), version);
         skillPaths.push(destPath);
       }
     }
@@ -330,42 +332,41 @@ export async function uninstall(
 
 export async function status(projectDir: string = process.cwd()): Promise<StatusResult> {
   const packageName = await getPackageName();
+  const version = await getPackageVersion();
 
   const localConfigPath = getLocalConfigPath(projectDir);
+  const localVersionMarker = join(localConfigPath, "skills", "test-baselining", ".version");
   const localConfigFile = join(localConfigPath, "opencode.json");
 
   const globalConfigPath = getGlobalConfigPath();
+  const globalVersionMarker = join(globalConfigPath, "skills", "test-baselining", ".version");
   const globalConfigFile = join(globalConfigPath, "opencode.json");
 
   let localStatus: { installed: boolean; version: string | null; pluginInConfig: boolean } | null = null;
   let globalStatus: { installed: boolean; version: string | null; pluginInConfig: boolean } | null = null;
 
   try {
-    const localSkillsPath = join(localConfigPath, "skills");
-    if (await exists(localSkillsPath)) {
-      const entries = await readdir(localSkillsPath, { withFileTypes: true });
-      const hasSkills = entries.some(e => e.isDirectory());
-      if (hasSkills) {
-        const localPluginInConfig = await isPluginInConfig(localConfigFile, packageName);
-        localStatus = { installed: true, version: null, pluginInConfig: localPluginInConfig };
-      }
-    }
+    const localVersion = (await readFile(localVersionMarker, "utf-8")).trim();
+    const localPluginInConfig = await isPluginInConfig(localConfigFile, packageName);
+    localStatus = { installed: true, version: localVersion, pluginInConfig: localPluginInConfig };
   } catch {
-    // Not installed
+    const skillPath = join(localConfigPath, "skills", "test-baselining");
+    if (await exists(skillPath)) {
+      const localPluginInConfig = await isPluginInConfig(localConfigFile, packageName);
+      localStatus = { installed: true, version: null, pluginInConfig: localPluginInConfig };
+    }
   }
 
   try {
-    const globalSkillsPath = join(globalConfigPath, "skills");
-    if (await exists(globalSkillsPath)) {
-      const entries = await readdir(globalSkillsPath, { withFileTypes: true });
-      const hasSkills = entries.some(e => e.isDirectory());
-      if (hasSkills) {
-        const globalPluginInConfig = await isPluginInConfig(globalConfigFile, packageName);
-        globalStatus = { installed: true, version: null, pluginInConfig: globalPluginInConfig };
-      }
-    }
+    const globalVersion = (await readFile(globalVersionMarker, "utf-8")).trim();
+    const globalPluginInConfig = await isPluginInConfig(globalConfigFile, packageName);
+    globalStatus = { installed: true, version: globalVersion, pluginInConfig: globalPluginInConfig };
   } catch {
-    // Not installed
+    const skillPath = join(globalConfigPath, "skills", "test-baselining");
+    if (await exists(skillPath)) {
+      const globalPluginInConfig = await isPluginInConfig(globalConfigFile, packageName);
+      globalStatus = { installed: true, version: null, pluginInConfig: globalPluginInConfig };
+    }
   }
 
   return {

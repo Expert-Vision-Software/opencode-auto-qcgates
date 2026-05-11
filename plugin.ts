@@ -1,44 +1,58 @@
 import type { Plugin } from "@opencode-ai/plugin";
-import { install, getGlobalConfigPath, getLocalConfigPath, type Scope } from "./src/installer.ts";
-import { exists, readdir } from "node:fs/promises";
+import { install, getGlobalConfigPath, getLocalConfigPath, getPackageVersion, type Scope } from "./src/installer.ts";
 import { join } from "node:path";
+
+const SKILL_NAMES = ["test-baselining", "regression-checking"] as const;
 
 const plugin: Plugin = async ({ directory }) => ({
   config: async () => {
+    const version = await getPackageVersion();
     const globalConfigPath = getGlobalConfigPath();
-    const localConfigPath = getLocalConfigPath(directory);
+    const globalVersionMarker = join(globalConfigPath, "skills", "test-baselining", ".version");
 
     const isGlobalInstall = directory === globalConfigPath ||
       directory.startsWith(globalConfigPath + "/") ||
       directory.startsWith(globalConfigPath + "\\");
 
-    const scope: Scope = isGlobalInstall ? "global" : "local";
+    let scope: Scope;
 
-    const configBase = scope === "global" ? globalConfigPath : localConfigPath;
-    const skillsPath = join(configBase, "skills");
-
-    let isInstalled = false;
-    try {
-      if (await exists(skillsPath)) {
-        const entries = await readdir(skillsPath, { withFileTypes: true });
-        isInstalled = entries.some(e => e.isDirectory());
+    if (isGlobalInstall) {
+      scope = "global";
+    } else {
+      try {
+        const globalVersion = (await Bun.file(globalVersionMarker).text()).trim();
+        if (globalVersion === version) {
+          return;
+        }
+      } catch {
+        // Global not installed, proceed with local
       }
-    } catch {
-      // Not installed
+      scope = "local";
     }
 
-    if (!isInstalled) {
-      const result = await install(scope, directory);
-      console.log(`\nInstalled opencode-auto-qcgates ${scope === "global" ? "globally" : "locally"}:`);
-      if (result.skillPaths.length > 0) {
-        console.log(`  Skills: ${result.skillPaths.join(", ")}`);
+    const marker = scope === "global"
+      ? globalVersionMarker
+      : join(directory, ".opencode", "skills", "test-baselining", ".version");
+
+    try {
+      const installedVersion = (await Bun.file(marker).text()).trim();
+      if (installedVersion === version) {
+        return;
       }
-      if (result.commandPaths.length > 0) {
-        console.log(`  Commands: ${result.commandPaths.join(", ")}`);
-      }
-      if (result.migrated) {
-        console.log(`  Migrated: opencode.json → .opencode/opencode.json`);
-      }
+    } catch {
+      // Not installed, proceed
+    }
+
+    const result = await install(scope, directory);
+    console.log(`\nInstalled opencode-auto-qcgates ${scope === "global" ? "globally" : "locally"}:`);
+    if (result.skillPaths.length > 0) {
+      console.log(`  Skills: ${result.skillPaths.join(", ")}`);
+    }
+    if (result.commandPaths.length > 0) {
+      console.log(`  Commands: ${result.commandPaths.join(", ")}`);
+    }
+    if (result.migrated) {
+      console.log(`  Migrated: opencode.json → .opencode/opencode.json`);
     }
   },
 });
