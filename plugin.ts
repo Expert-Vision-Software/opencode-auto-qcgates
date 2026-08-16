@@ -1,5 +1,5 @@
 import type { Plugin, Config } from "@opencode-ai/plugin";
-import { install, getGlobalConfigPath, getPackageVersion, ScopeResolver, isLocalInstalled, readLocalConfig, mergeConfigWithOverrides } from "./src/installer.ts";
+import { install, getGlobalConfigPath, getPackageVersion, ScopeResolver, isLocalInstalled, readLocalConfig, mergeConfigWithOverrides, printRecommendations } from "./src/installer.ts";
 import { join } from "node:path";
 
 const SKILL_NAMES = ["test-baselining", "regression-checking"] as const;
@@ -43,6 +43,7 @@ const plugin: Plugin = async ({ directory }) => ({
       if (result.commandPaths.length > 0) {
         console.log(`  Commands: ${result.commandPaths.join(", ")}`);
       }
+      printRecommendations(result.recommendations);
       setExploreSkillPermissions(input);
       return;
     }
@@ -76,6 +77,7 @@ const plugin: Plugin = async ({ directory }) => ({
       if (result.migrated) {
         console.log(`  Migrated: opencode.json → .opencode/opencode.json`);
       }
+      printRecommendations(result.recommendations);
 
       const newLocalConfig = await readLocalConfig(directory);
       if (newLocalConfig) {
@@ -99,6 +101,7 @@ const plugin: Plugin = async ({ directory }) => ({
         if (result.migrated) {
           console.log(`  Migrated: opencode.json → .opencode/opencode.json`);
         }
+        printRecommendations(result.recommendations);
 
         const localConfig = await readLocalConfig(directory);
         if (localConfig) {
@@ -122,6 +125,7 @@ const plugin: Plugin = async ({ directory }) => ({
     if (result.migrated) {
       console.log(`  Migrated: opencode.json → .opencode/opencode.json`);
     }
+    printRecommendations(result.recommendations);
 
     const finalLocalConfig = await readLocalConfig(directory);
     if (finalLocalConfig) {

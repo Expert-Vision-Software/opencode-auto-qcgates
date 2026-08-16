@@ -49,9 +49,16 @@ These question patterns activate the skill:
 
 ```
 1. Determine if a fresh eval is needed
-   ├─ Check git diff since the last eval
+   ├─ Check the consumer's source control for changes since the last eval
    ├─ If no changes → reuse cached results
    └─ If changes exist → run test-baselining eval
+
+   (The "Check source control" step is VCS-agnostic at the body level. See
+   test-baselining's refs/source-controls.md for the per-VCS lookup — git,
+   Mercurial, Subversion, Pijul, Fossil, Unity VCS, Perforce, Bazaar, Darcs.
+   Run the right "has changes?" command for whatever source control the
+   consumer uses; if the VCS tool isn't on PATH, fall back to an mtime scan
+   and flag the fallback in the output.)
 
 2. Load test-baselining (via the agent's skill loader) and run `eval`
 
@@ -60,9 +67,9 @@ These question patterns activate the skill:
 
 4. Interpret results through the risk lens:
    ├─ Parse PASS / FAIL using pass_fail_criteria
-   ├─ Analyze threshold deltas against baseline_thresholds
+   ├─ Analyze threshold deltas against baseline_thresholds, including build-artifact deltas
    ├─ Map deltas to risk levels
-   └─ Identify specific violations
+   └─ Identify specific violations (artefact-size violations count, even when tests pass)
 
 5. Emit:
    ├─ Human-readable quality narrative
@@ -75,10 +82,12 @@ To avoid unnecessary test runs:
 
 | Scenario | Action |
 |----------|--------|
-| No git changes since last eval | Reuse last eval results |
+| No source-control changes since last eval | Reuse last eval results |
 | Untracked / changed files exist | Run fresh eval |
 | Baseline file missing | Prompt to run `test-baselining init` |
 | Eval older than 1 hour | Run fresh eval (staleness check) |
+
+**`No source-control changes`** is VCS-agnostic at the body level. The concrete command and stable hash for the cache key differ per VCS — consult `test-baselining`'s `refs/source-controls.md` to pick the right "has changes?" probe (e.g. `git status --porcelain` + HEAD SHA for Git, `cm status --short` + working changeset for Unity VCS, `p4 status -A` + `p4 have` revision for Perforce). When the VCS tool is missing from PATH, fall back to a recursive `find -newer` scan and **flag the fallback in the eval output** — the cache is then advisory, not authoritative.
 
 ## Decision Output
 

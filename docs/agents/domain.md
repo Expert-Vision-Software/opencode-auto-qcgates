@@ -44,6 +44,10 @@ These are the load-bearing conventions. Read `AGENTS.md` for the full list; thes
 - **Templates are placeholders.** `templates/testing-protocol.md` and `templates/testing-baseline.xml` ship as starting points. The consumer's adapted versions are the live source; the skill body must not assume the template's structure.
 - **Changelog is append-only.** Never edit prior `<Entry>` blocks in a consumer's `testing-baseline.xml`; only append. Same for this repo's `CHANGELOG.md` between releases.
 - **Threshold matrix in the skill body is a seed.** The protocol's `baseline_thresholds` table is the live source. Defaults exist only to populate an empty protocol.
+- **`refs/` files are non-authoritative.** Files under `assets/skills/<name>/refs/` are bundled with the skill (and copied to the consumer). The skill body consults them during guided flows — `source-controls.md` is always-relevant (VCS-aware location + cache logic); `backends-ref.md` and `frontend-refs.md` are init-only (grill scaffolding for tier discovery). Once the consumer's `testing-protocol.md` is written, the references have no bearing on policy.
+- **Build artefacts are mandatory in every eval and update.** Captured per-tier (file count, total MB, build time, gzipped KB on critical files, lint-warning categories) in Stage 1; surfaced alongside test deltas in the eval output; required for any `update` write — a baseline update that drops artefact fields is invalid. The XML template's `<Build>` (backend) and `<BuildArtifacts>` (frontend) shapes are mandatory tier blocks.
+- **VCS-agnostic body.** Skill bodies never assume `.git/` or git-specific commands; the `refs/source-controls.md` table is the lookup. The consumer's actual source control — Git, Mercurial, Subversion, Pijul, Fossil, Unity VCS, Perforce, Bazaar, Darcs — drives the discovery command.
+- **Backend / frontend stack agnostic at body level.** `refs/backends-ref.md` and `refs/frontend-refs.md` carry the stack-specific grill scaffolding. They are *consulted* during init; they are *not* authoritative once the protocol exists. No hard-coded "frontend = npm" anywhere in the skill.
 
 ## Use the glossary's vocabulary
 
@@ -53,7 +57,7 @@ If the concept you need isn't in the glossary yet, that's a signal — either yo
 
 ## File-location rule (consumer projects)
 
-When a skill runs inside a consumer project, it locates `testing-protocol.md` and `testing-baseline.xml` deterministically: project root (the directory containing `.git/`) → cwd → stop-and-ask. Never invent a path. Warn when the files are found in a non-root location (monorepo subpackage) since thresholds may not match the outer project.
+When a skill runs inside a consumer project, it locates `testing-protocol.md` and `testing-baseline.xml` deterministically: project root (the working-tree root of whatever source control the consumer uses — `.git/`, `.hg/`, `.svn/`, Unity VCS `.plastic/`, etc., per `refs/source-controls.md`) → cwd → stop-and-ask. Never invent a path. Warn when the files are found in a non-root location (monorepo subpackage, Unity `Packages/com.<vendor>.<name>/`) since thresholds may not match the outer project.
 
 ## Flag conflicts with existing docs
 

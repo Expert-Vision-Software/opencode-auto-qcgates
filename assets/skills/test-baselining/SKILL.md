@@ -30,11 +30,13 @@ These files are the single source of truth for evaluation. The skill reads them 
 
 Locate `testing-protocol.md` and `testing-baseline.xml` deterministically. Try, in order:
 
-1. **Project root** — the directory containing the git working tree marker (`.git/`).
-2. **Current working directory** — fallback when no `.git/` is reachable.
+1. **Project root** — the working-tree root of the consumer's source control (git, Mercurial, Subversion, Pijul, Fossil, **Unity VCS** (Unity Version Control / Plastic SCM), Perforce, Bazaar, Darcs, …). Use `refs/source-controls.md` as the VCS-agnostic lookup table; it lists the local root marker per VCS and the right "has changes?" command for the regression-check cache.
+2. **Current working directory** — fallback when no source-control root is reachable.
 3. **Stop and ask** if neither exists or they disagree on tier structure. Never invent a path.
 
-When you find them in a non-root location (monorepo subpackage), use them and warn the user that thresholds may not match the outer project.
+When you find them in a non-root location (monorepo subpackage, Unity `Packages/com.<vendor>.<name>/`, etc.), use them and warn the user that thresholds may not match the outer project.
+
+The skills are **VCS-agnostic at the body level**: every reference to "git diff" or `.git/` above is a stand-in for whatever source control the project uses. The actual command and marker vary by VCS — `refs/source-controls.md` carries the lookup table, the agent runs it, and falls forward.
 
 ## Commands
 
@@ -47,7 +49,15 @@ Build the consumer's first `testing-protocol.md` and `testing-baseline.xml` from
 - **Code project** — has a toolchain (build commands, test commands, coverage tooling). Proceed to Step 2.
 - **Non-code project** — repo of documents, configs, books, policies, data. Proceed to Step 2 anyway; the "tiers" become document classes or verification passes, and "tests" become deterministic checks (linters, validators, schema checks, count rules). Skip the build stage; the Build step becomes `validate`.
 
-**Step 2 — discover tiers.** Grilling is mandatory whenever tiers are not obvious. Ask, in order, until each tier is named and bounded:
+**Step 2 — discover tiers.** Grilling is mandatory whenever tiers are not obvious. **Before grilling**, consult the bundled init-time references so the questions are grounded in the project's actual stack — not in template defaults:
+
+- `refs/source-controls.md` — which source control is the project on? Determines the consumer-root lookup during eval/update; **always relevant, not init-only**.
+- `refs/backends-ref.md` — backend-toolchain map (C#, JVM, Go, Rust, Python, Node, Elixir, …) and a 10-question grill order. **Init-only.** Once the protocol is written, this file has no bearing.
+- `refs/frontend-refs.md` — frontend-stack map (React, Vue, Svelte, Angular, Solid, **Aurelia 2**, Lit, Ember, HTMX, …) and a 10-question grill order. **Init-only.** Once the protocol is written, this file has no bearing.
+
+The skills themselves are backend-language and frontend-framework agnostic at the body level; these references are *grill scaffolding only* — confirm every stack choice with the user before you pin it in the protocol.
+
+Ask, in order, until each tier is named and bounded:
 
 | Question | Why it matters |
 |----------|----------------|
@@ -55,10 +65,12 @@ Build the consumer's first `testing-protocol.md` and `testing-baseline.xml` from
 | What is the toolchain per tier? (dotnet, npm, pip, scripts, validators) | Determines the command to run per stage |
 | What is the test framework per tier? (xUnit, Jest, Vitest, pytest, none) | Determines which metrics to capture |
 | What is the coverage tool per tier? (coverlet, v8, coverage.py, none) | Determines coverage metrics |
-| What artifact paths exist? (dist/, build/, output/) | Determines artifact-size metrics |
+| **What is the build-artifact directory per tier? (bin/, dist/, target/, build/, _build/, out/, .next/, storybook-static/)** | **Always-recorded baseline metric (file count, total MB, gzipped KB of critical files, build time). Do not skip.** |
 | Are there external services under test? | Domain Isolation rule applies |
 
-For each tier, name it, pick a toolchain, pick a metric set. The union becomes the protocol.
+For each tier, name it, pick a toolchain, pick a metric set, and identify the artifact directory. The union becomes the protocol.
+
+If a backends or frontends reference shortlists a stack the user names verbatim, **still confirm the exact command**, the **exact build command**, and the **exact artifact directory** with the user before you write them — the project's actual `package.json` / `csproj` / `Cargo.toml` is the truth, not the row in the reference.
 
 **Step 3 — write `testing-protocol.md`.** Tailor the template (`templates/testing-protocol.md`) to the discovered tiers:
 
@@ -88,8 +100,9 @@ Compares current execution against the existing baseline.
 1. Locate the protocol and baseline files (see *Locating the Consumer Files*).
 2. Read `testing-protocol.md` for workflow stages, thresholds, and pass/fail criteria.
 3. Execute each stage against the current consumer project.
-4. Compare metrics against baseline; apply threshold rules.
-5. Report status, deltas, and violations.
+4. **Capture the build-artifact metrics for every tier** (file count, total MB, gzipped KB on critical files, build time, lint-warning categories). Skipping these means the eval is incomplete — an eval without artefact metrics is *not* "no change in artefacts", it's "artefacts not measured".
+5. Compare metrics against baseline; apply threshold rules. **Artifact-size threshold compares every captured file**, not just `TotalSizeMB` — a single critical-file doubling silently breaks the budget if you only sum.
+6. Report status, deltas, and violations. Include the **Build-artifact summary** from Stage 3.
 
 **When to use:** Default behavior. Run after every meaningful change to the consumer code or documents.
 
@@ -99,14 +112,16 @@ Updates the baseline only when **both** conditions hold:
 
 - Current run is PASS (zero failures, no build/validate errors, no lint errors)
 - At least one metric exceeds its threshold (so the update represents a real shift, not noise)
+- **The eval captured build-artifact metrics.** If artefacts were skipped, do not update — re-run the eval with artefacts measured first. The updated baseline must never drop artefact fields.
 
 Workflow:
 
 1. Increment the baseline marker (`BL-001` → `BL-002`, etc.)
-2. Generate a one-sentence changelog summary naming which thresholds crossed
+2. Generate a one-sentence changelog summary naming which thresholds crossed — **include the artefacts if they are the trigger** (e.g. "Frontend entry chunk gzipped grew from 188 KB to 312 KB, +66% ▲▲, exceeds the 10% artefact-size threshold").
 3. Append a new `<Changelog><Entry>`; **never modify prior entries**
-4. Prune the changelog to the last 10 entries (FIFO)
-5. Update `<Metadata.LastUpdated>` and write the file
+4. Write the per-tier `<Build>` (backend) or `<BuildArtifacts>` (frontend, or any tier with an output directory) block with the captured metrics — this is non-negotiable; a baseline update that omits artefact fields is invalid.
+5. Prune the changelog to the last 10 entries (FIFO)
+6. Update `<Metadata.LastUpdated>` and write the file
 
 **When to use:** When the user explicitly requests a baseline update after confirming the new numbers are acceptable.
 
@@ -126,7 +141,18 @@ The protocol file is authoritative; the stages below are the canonical shape, no
 
 ### Stage 1: Build (or Validate)
 
-Compile and lint. For non-code consumers, run the project's validators (markdownlint, schema validators, custom checks).
+Compile and lint. **Every build stage also captures the build-artifact metrics** — these are part of every eval, baseline update, and changelog entry. Do not skip even on "no-code" consumers: a documents repo still has a build (the linted/finalised PDF, EPUB, or static-site directory) with an output directory and a file count.
+
+For code consumers:
+
+1. Run the tier's build command.
+2. Record `BuildTime` (elapsed `time`).
+3. Locate the tier's `OutputDirectory` (`bin/`, `dist/`, `target/`, `build/`, `_build/`, `out/`, `.next/`, `storybook-static/`, `pkg/`, `target/release/`, …).
+4. Record for the **whole output directory**: `FileCount` (excluding VCS noise like `.git`, IDE temp, generated symbol files: `.pdb`, `.dSYM`, `*.map` unless the protocol marks them load-bearing), `TotalSizeMB` (uncompressed sum).
+5. Record **per-critical-file** fingerprints: the primary binary / shared library / entry chunk / CSS bundle / main font — whichever the protocol declares. For each: raw `SizeKB` and gzipped `SizeGzippedKB`. (See `refs/backends-ref.md` § "Build artifact capture" and `refs/frontend-refs.md` § "Build artifact capture" for the per-stack critical-file list.)
+6. Record `LintWarnings` count, grouped by rule family (e.g. `react-hooks: 0`, `a11y: 2`, `import: 0`). The protocol's `<WarningsByCategory>` shape expands per project.
+
+For non-code consumers, run the project's validators (markdownlint, schema validators, custom checks). Capture equivalent metrics where they apply: validation rule counts, severity counts, output artefact size for document repos that emit a final form.
 
 ### Stage 2: Per-Tier Tests
 
@@ -134,14 +160,16 @@ For each tier named in the protocol:
 
 1. Execute the tier's test command with coverage collection.
 2. Record: test count, pass count, fail count, pass rate, coverage %, duration.
+3. **Also re-record the build-artifact metrics** (file count, total MB, gzipped KB, build time) if the tier's tests rely on a fresh build. The Stage 1 numbers are authoritative; Stage 2 only re-records when the test command itself produces or alters the output directory.
 
 ### Stage 3: Evaluate
 
 Apply the protocol's `pass_fail_criteria` and `baseline_thresholds`. Produce:
 
 - **Status**: PASS or FAIL
-- **Violations**: each metric whose delta crossed its threshold
-- **Delta**: per-metric change vs baseline
+- **Violations**: each metric whose delta crossed its threshold — **artifacts included**, never omitted (a run without artifact metrics is *incomplete*, not "no change")
+- **Delta**: per-metric change vs baseline, with **artifact size deltas surfaced alongside the test deltas** so regressions like "bundled font file doubled in size" aren't buried under `pass rate` lines
+- **Build-artifact summary**: one line per tier (`Backend: 142 files, 47.3 MB total, 312 ms critical gzipped; Frontend: 23 files, 2.1 MB total, 188 ms entry gzipped`), so the human reader sees the artefact state at a glance
 
 ### Stage 4: Decision
 
@@ -163,6 +191,8 @@ ELIF test_result == FAIL:
 ## Baseline XML Structure
 
 The XML holds **only** what the protocol declares. Adapt the template (`templates/testing-baseline.xml`) to the consumer's actual tiers — the placeholders for `<Backend>` / `<Frontend>` are examples, not requirements.
+
+**Hard rule on build artefacts:** every tier the protocol declares as producing a build artefact (i.e. has an `OutputDirectory`) carries a `<Build>` (backend-style) or `<BuildArtifacts>` (frontend-style) block. **Every eval must capture these artefact fields; a baseline update that drops or zeroes any of them is invalid.** The block's `FileCount`, `TotalSizeMB`, `BuildTime`, `<KeyFiles>` (or `<CriticalFiles>`), and `<LintWarningsByCategory>` (if the build runs a linter) fields are mandatory. `init` seeds them from the actual build; `eval` updates them; `update` refreshes them with the new numbers — same field set across all three flows, no exceptions.
 
 ## Baseline Marker & Changelog
 
@@ -190,8 +220,9 @@ Every eval reports:
 
 - **Status**: PASS / FAIL
 - **Per-tier summary**: counts, pass rate, duration
-- **Threshold evaluation**: which metrics exceeded
+- **Threshold evaluation**: which metrics exceeded — **artefact deltas surface alongside test deltas, never buried**
 - **Delta from baseline**: +/- change per metric
+- **Build-artifact summary**: one line per tier (`TierName: N files, M MB total, K ms critical-file gzipped; lint warnings by category: a:0, b:2`)
 - **Recommendation**: update baseline (if applicable), or fix required
 
 ## Stop-Failure Protocol

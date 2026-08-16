@@ -32,6 +32,14 @@
 - Node: npm run build
 - Maven: mvn package
 - Gradle: gradle build
+
+**Mandatory build-artifact capture** (every eval, no exceptions):
+- Record `BuildTime` (elapsed `time` of the build command)
+- Resolve `OutputDirectory` (the canonical name for this stack: `bin/`, `dist/`, `target/`, `build/`, `_build/`, `pkg/`, `out/`, `target/release/`)
+- Record `FileCount` (whole output directory, excluding VCS noise like `.git`, IDE temp, generated `.pdb`/`.dSYM`/`*.map` unless load-bearing)
+- Record `TotalSizeMB` (uncompressed sum of every file)
+- Record per-critical-file fingerprints (primary binary, shared library, entry chunk, CSS bundle, main font if self-hosted): raw `SizeKB` and gzipped `SizeGzippedKB`
+- Record `LintWarnings` count, grouped by rule family (`react-hooks: 0`, `a11y: 2`, …)
 </stage>
 
 <stage name="Test_Backend">
@@ -41,6 +49,7 @@
 - Node/Vitest: npm run test:coverage
 - Python: pytest --cov
 Parse coverage from output or coverage file.
+If the test command produces or refreshes the build output directory, re-record the build-artifact metrics from the Build stage (file count, total MB, gzipped KB, build time).
 </stage>
 
 <stage name="Test_Frontend">
@@ -56,7 +65,7 @@ Parse coverage from output or coverage file.
 - Cypress: npm run test:e2e
 - Selenium: appropriate command
 </e2e>
-Record coverage from terminal, build time, artifact sizes.
+Record coverage from terminal; re-record build-artifact metrics (file count, total MB, gzipped KB, build time) if the test command produces or refreshes the output directory.
 </stage>
 
 <stage name="Evaluate">

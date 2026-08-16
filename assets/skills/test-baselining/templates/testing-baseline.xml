@@ -58,7 +58,14 @@
             </WarningsByCategory>
             <OutputDirectory>./bin</OutputDirectory>
             <FileCount>0</FileCount>
-            <TotalSizeMB>0</TotalSizeMB>
+            <TotalSizeMB>0.00</TotalSizeMB>
+            <CriticalFiles>
+                <File>
+                    <Name>primary-binary</Name>
+                    <SizeKB>0.00</SizeKB>
+                    <SizeGzippedKB>0.00</SizeGzippedKB>
+                </File>
+            </CriticalFiles>
         </Build>
     </Backend>
 
@@ -97,12 +104,32 @@
             <Lines>0.00</Lines>
         </Coverage>
         <BuildArtifacts>
+            <Status>Success</Status>
             <BuildTime>0.00</BuildTime>
             <OutputDirectory>./dist</OutputDirectory>
-            <TotalSizeMB>0</TotalSizeMB>
+            <FileCount>0</FileCount>
+            <TotalSizeMB>0.00</TotalSizeMB>
+            <LintWarnings>0</LintWarnings>
+            <LintWarningsByCategory>
+                <Style>0</Style>
+                <Correctness>0</Correctness>
+                <Dependency>0</Dependency>
+                <TypeSafety>0</TypeSafety>
+                <Other>0</Other>
+            </LintWarningsByCategory>
             <KeyFiles>
                 <File>
                     <Name>index.html</Name>
+                    <SizeKB>0.00</SizeKB>
+                    <SizeGzippedKB>0.00</SizeGzippedKB>
+                </File>
+                <File>
+                    <Name>entry-chunk.js</Name>
+                    <SizeKB>0.00</SizeKB>
+                    <SizeGzippedKB>0.00</SizeGzippedKB>
+                </File>
+                <File>
+                    <Name>styles.css</Name>
                     <SizeKB>0.00</SizeKB>
                     <SizeGzippedKB>0.00</SizeGzippedKB>
                 </File>

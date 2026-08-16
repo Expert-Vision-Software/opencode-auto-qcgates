@@ -27,7 +27,7 @@ Bring automated **quality gate evaluation** into every AI agent session. This pl
 - **Regression Checking** — Answer "did we break anything?", "should I proceed or stop?", "is it safe to commit?"
 - **Quality Gates** — Threshold-based pass/fail with structured decision signals for agents
 
-Works with .NET, Node.js, Python, Java — and any test framework (xUnit, Jest, Vitest, pytest, etc.).
+Works with .NET, Node.js, Python, Java, Go, Rust, Elixir — and any test framework (xUnit, Jest, Vitest, pytest, go test, cargo test, mix test, etc.). Supports any source control: Git, Mercurial, Subversion, Pijul, Fossil, **Unity VCS**, Perforce, Bazaar, Darcs. When the installer detects Aurelia 2 in the project, it prints a non-blocking recommendation to install the companion `aurelia-expert` skill pack.
 
 ## Quick Start
 
@@ -169,10 +169,13 @@ Do not commit until status is PASS.
 
 ## Architecture
 
-The plugin is project-type agnostic:
-- Build commands: dotnet, npm, mvn, gradle
-- Test frameworks: xUnit, Jest, Vitest, pytest, NUnit
-- Coverage tools: Cobertura, v8, coveragepy
+The plugin is project-type, source-control, and language agnostic:
+- **Tiers:** discovered during `init` by grilling the user — backend, frontend, scripts, docs, schemas, anything with a repeatable verification procedure (non-code repos are first-class).
+- **Source controls:** discovery lookup table in `assets/skills/test-baselining/refs/source-controls.md` (Git, Mercurial, Subversion, Pijul, Fossil, **Unity VCS**, Perforce, Bazaar, Darcs).
+- **Backend toolchains:** C#, JVM, Go, Rust, Python, Node, Elixir, … — listed in `refs/backends-ref.md` (init-only guidance, never overrides the protocol).
+- **Frontend stacks:** React, Vue, Svelte, Angular, Solid, **Aurelia 2**, Lit, Ember, HTMX, … — listed in `refs/frontend-refs.md` (init-only guidance).
+- **Build artefacts:** captured per-tier (file count, total MB, gzipped KB on critical files, build time, lint-warning categories) on every eval and written into every baseline update. They live alongside test deltas in the eval output — never buried.
+- **Aurelia detection:** the installer reads `package.json`, detects `aurelia` / `@aurelia/*` dependencies, and prints a non-blocking recommendation on install (the installer never modifies the consumer config). The recommendation points at the OpenCode plugin path *and* the `npx skills add` fallback for non-OpenCode agents.
 
 See `AGENTS.md` for detailed developer documentation.
 

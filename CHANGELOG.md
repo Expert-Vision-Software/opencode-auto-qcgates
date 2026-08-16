@@ -5,6 +5,26 @@ All notable changes to `opencode-auto-qcgates` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-08-16
+
+### Added
+- **`refs/` reference assets under `assets/skills/test-baselining/`** — three new files consult during guided flows:
+  - `refs/source-controls.md` — VCS-agnostic lookup table (root markers + "has changes?" commands) for Git, Mercurial, Subversion, Pijul, Fossil, **Unity VCS** (Unity Version Control / Plastic SCM), Perforce, Bazaar, Darcs. Always-relevant: consulted during `init`, `Locating the Consumer Files`, and `regression-checking` Caching Logic.
+  - `refs/backends-ref.md` — backend-toolchain map and ten-question grill order (C#, JVM, Go, Rust, Python, Node, Elixir, Erlang, Haskell, Scala, C++). **Init-only** — once the consumer's `testing-protocol.md` is written, this file has no bearing.
+  - `refs/frontend-refs.md` — frontend-stack map and ten-question grill order (React, Vue, Svelte, Angular, Solid, **Aurelia 2**, Lit, Ember, HTMX, …). **Init-only**, same authority rule as `backends-ref.md`.
+- **Aurelia detection in the installer** — `src/installer.ts#detectAurelia` reads `package.json` for `aurelia` / `@aurelia/*` deps (across `dependencies`, `devDependencies`, `peerDependencies`, `optionalDependencies`) and, on hit, appends a non-blocking recommendation to `InstallResult.recommendations`. The recommendation names the OpenCode plugin path (`"aurelia-expert"` in `opencode.json`) and the cross-agent `npx skills add` fallback. The installer never modifies the consumer config autonomously.
+- **Build-artifact capture hardened** — Stage 1 of `test-baselining` now *mandates* catching artefact metrics per tier (`BuildTime`, `OutputDirectory`, `FileCount`, `TotalSizeMB`, per-critical-file `SizeKB` + `SizeGzippedKB`, and `LintWarnings` by category). `eval` and `update` steps explicitly require artefact metrics; an `update` that drops artefact fields is invalid. The eval output surfaces artefact deltas alongside test deltas — never buried under them.
+- **`reference` and `installer recommendation` glossary terms** in `CONTEXT.md`.
+- **Tests** — `detectAurelia` coverage: missing `package.json`, non-Aurelia package, `aurelia` in `dependencies`, `@aurelia/runtime` in `devDependencies`, message routing (OpenCode + `npx skills add` paths).
+
+### Changed
+- `test-baselining` SKILL.md — `Locating the Consumer Files` is now VCS-agnostic (points at `refs/source-controls.md`); `init` Step 2 directs the agent to `refs/` *before* grilling; `eval` / `update` / `Baseline XML Structure` / `Output Format` all require build-artifact fields.
+- `regression-checking` SKILL.md — `Execution Flow` and `Caching Logic` rewritten to use VCS-agnostic wording, with a pointer at `test-baselining`'s `refs/source-controls.md` for the per-VCS "has changes?" command.
+- `templates/testing-protocol.md` — `Build` stage explicitly lists the mandatory artefact capture list; `Test_Backend` and `Test_Frontend` re-record artefacts when the test command alters the output directory.
+- `templates/testing-baseline.xml` — `<Build>` (backend) gains `<CriticalFiles>`; `<BuildArtifacts>` (frontend) gains `Status`, `FileCount`, `LintWarnings`, `LintWarningsByCategory`, and three canonical `<KeyFiles>` slots (entry chunk, CSS bundle, html).
+- `AGENTS.md` — Asset-structure diagram gains the `refs/` row; Key Conventions gain the `refs/` policy, VCS-agnostic body rule, build-artifact capture rule, and the installer-recommendation non-blocking rule.
+- `README.md` — Architecture section now lists tiers, source-control coverage, backend / frontend toolchain coverage, build-artifact capture, and Aurelia detection.
+
 ## [1.3.0] - 2026-08-16
 
 ### Added
