@@ -176,6 +176,8 @@ The skill auto-generates the summary based on which thresholds were exceeded:
 | Coverage change | "Coverage improved by X%, thresholds exceeded" |
 | Multiple thresholds | "Test count +X%, coverage +Y%, build time +Z%, thresholds exceeded" |
 
+**CRITICAL:** Existing changelog entries must NEVER be modified -- only append new entries.
+
 ### Changelog Pruning
 - Maximum 10 entries retained
 - When limit is exceeded, oldest entry is removed (FIFO)

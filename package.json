@@ -39,9 +39,9 @@
     "@opencode-ai/plugin": "*"
   },
   "devDependencies": {
-    "@types/node": "latest",
     "@types/bun": "latest",
+    "@types/node": "latest",
+    "js-yaml": "^5.3.0",
     "typescript": "latest"
   }
 }
-
