@@ -35,7 +35,7 @@ describe("TestBaseliningPlugin", () => {
     expect(await exists(commandPath)).toBe(true);
 
     const skillContent = await readFile(skillPath, "utf-8");
-    expect(skillContent).toContain("Test Baselining Skill");
+    expect(skillContent).toContain("# Test Baselining");
 
     const commandContent = await readFile(commandPath, "utf-8");
     expect(commandContent).toContain("test-baseline");

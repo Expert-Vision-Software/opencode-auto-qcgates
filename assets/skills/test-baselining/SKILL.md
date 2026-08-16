@@ -1,219 +1,156 @@
 ---
 name: test-baselining
-description: Test execution, baseline management, and threshold evaluation for quality gates. Activates when user asks to run tests, evaluate against baseline, or update test baselines. Reads testing-protocol.md from the consumer project for workflow and threshold definitions.
+description: Test execution, baseline management, and threshold evaluation for quality gates. Use when running tests, evaluating against baseline, or updating baselines in a consumer project. Reads testing-protocol.md from the consumer project root for workflow and threshold definitions.
 ---
 
-# Test Baselining Skill
+# Test Baselining
 
-A generalized skill for executing tests, managing baselines, and evaluating quality gates across projects with threshold-based decision making.
+A generalized skill for executing tests, capturing metrics, and evaluating quality gates by comparing against a frozen baseline. Works under any dot-agents-compatible agent (Claude Code, OpenCode, etc.) — the body is agent-agnostic; OpenCode-specific bindings are noted in the last section.
 
 ## Purpose
 
 Provides a standardized framework for:
-- **Running tests** across backend and frontend layers
-- **Capturing baselines** of key metrics (test counts, pass rates, coverage, build times)
-- **Evaluating against thresholds** to determine quality gate pass/fail
-- **Conditional baseline updates** only when criteria are met
+- **Running tests** across one or more project tiers (backend, frontend, documents, anything with a repeatable verification procedure)
+- **Capturing baselines** of key metrics (counts, pass rates, coverage, build time, artifact size)
+- **Evaluating against thresholds** to decide whether the quality gate passes
+- **Updating the baseline** only when criteria are met
 
 ## Consumer Project Files
 
-After `init`, the following files exist at the consumer project root:
+After `init`, two files live at the consumer project root:
 
-| File | Description |
-|------|-------------|
-| `testing-protocol.md` | Protocol definition with execution workflow, thresholds, and decision logic |
+| File | Purpose |
+|------|---------|
+| `testing-protocol.md` | Workflow stages, thresholds, and pass/fail criteria — **specific to this consumer project's tiers and toolchain** |
 | `testing-baseline.xml` | Baseline metrics and changelog |
 
-If these files are not at the project root, the skill searches upward from the working directory to locate them.
+These files are the single source of truth for evaluation. The skill reads them every run; never inline a copy.
+
+## Locating the Consumer Files
+
+Locate `testing-protocol.md` and `testing-baseline.xml` deterministically. Try, in order:
+
+1. **Project root** — the directory containing the git working tree marker (`.git/`).
+2. **Current working directory** — fallback when no `.git/` is reachable.
+3. **Stop and ask** if neither exists or they disagree on tier structure. Never invent a path.
+
+When you find them in a non-root location (monorepo subpackage), use them and warn the user that thresholds may not match the outer project.
 
 ## Commands
 
 ### `init` — Initialize Baseline
 
-Creates `testing-protocol.md` and `testing-baseline.xml` at the consumer project root.
+Build the consumer's first `testing-protocol.md` and `testing-baseline.xml` from the actual project, not from a generic template.
 
-**When to use:** When setting up baseline for the first time or regenerating from scratch.
+**Step 1 — classify the consumer.** Decide which branch applies:
 
-**Workflow:**
-```
-Copy testing-protocol.md → Build → Test_Backend → Test_Frontend → Capture Metrics → Create Baseline
-```
+- **Code project** — has a toolchain (build commands, test commands, coverage tooling). Proceed to Step 2.
+- **Non-code project** — repo of documents, configs, books, policies, data. Proceed to Step 2 anyway; the "tiers" become document classes or verification passes, and "tests" become deterministic checks (linters, validators, schema checks, count rules). Skip the build stage; the Build step becomes `validate`.
 
-**Actions:**
-1. Copy/tailor `testing-protocol.md` from plugin assets to consumer project root
-2. Build and run tests to capture current metrics
-3. Create `testing-baseline.xml` with initial baseline marker `BL-001`
-4. Create initial changelog entry: "Initial baseline created"
+**Step 2 — discover tiers.** Grilling is mandatory whenever tiers are not obvious. Ask, in order, until each tier is named and bounded:
 
-### `eval` (default) — Evaluate Against Baseline
+| Question | Why it matters |
+|----------|----------------|
+| What tiers exist? (backend, frontend, scripts, docs, schemas, …) | Determines protocol sections and XML structure |
+| What is the toolchain per tier? (dotnet, npm, pip, scripts, validators) | Determines the command to run per stage |
+| What is the test framework per tier? (xUnit, Jest, Vitest, pytest, none) | Determines which metrics to capture |
+| What is the coverage tool per tier? (coverlet, v8, coverage.py, none) | Determines coverage metrics |
+| What artifact paths exist? (dist/, build/, output/) | Determines artifact-size metrics |
+| Are there external services under test? | Domain Isolation rule applies |
 
-Compares current test execution results against the existing baseline using threshold rules.
+For each tier, name it, pick a toolchain, pick a metric set. The union becomes the protocol.
 
-**When to use:** Default behavior when running tests with quality gate evaluation.
+**Step 3 — write `testing-protocol.md`.** Tailor the template (`templates/testing-protocol.md`) to the discovered tiers:
 
-**Workflow:**
-```
-Build → Test_Backend → Test_Frontend → Evaluate → Decision
-```
+- One `<stage>` per tier (replace the template's `Test_Backend` / `Test_Frontend` with the actual tier names: `Test_Api`, `Test_Web`, `Test_Docs_Lint`, `Test_Schema_Validate`, …)
+- Adapt the build/test/coverage commands to the toolchain each tier uses
+- Set thresholds from `testing-protocol.md`'s baseline_thresholds table — **do not** copy the template's default values verbatim; they are placeholders, not advice
+- Adapt `pass_fail_criteria` to the actual pass rate / coverage / lint expectations of this tier set
+- Adapt `anti_patterns` to the project, not the template's exemplar stack
 
-**Actions:**
-1. Locate `testing-protocol.md` and `testing-baseline.xml` in consumer project
-2. Read protocol file for workflow, thresholds, and decision logic
-3. Execute build and tests
-4. Compare metrics against baseline
-5. Report pass/fail with threshold deltas
+If the template ships placeholders like `<Project name="Backend.Tests">`, replace them with real project names.
+
+**Step 4 — write `testing-baseline.xml`.** Adapt the XML template to match the discovered tiers:
+
+- Replace the `<Backend>` / `<Frontend>` blocks with one block per tier (rename nodes to match; keep the same metric shape: counts, pass rate, coverage, build time, warnings, artifact size)
+- Replace `<Dependencies>` fields with the discovered toolchain per tier
+- Set `<Metadata.BaselineId>` to `BL-001`
+- Add `<Changelog><Entry>` with `Date=YYYY-MM-DD`, `Changes=Initial baseline`, `Reason=Project baseline established`
+
+**Step 5 — run tests and capture the first baseline.** Now (and only now) execute the protocol, capture metrics, and populate the XML. Write the file. The baseline marker is `BL-001`.
+
+**When to use:** First-time setup, or full regeneration from scratch.
+
+### `eval` — Evaluate Against Baseline (default)
+
+Compares current execution against the existing baseline.
+
+1. Locate the protocol and baseline files (see *Locating the Consumer Files*).
+2. Read `testing-protocol.md` for workflow stages, thresholds, and pass/fail criteria.
+3. Execute each stage against the current consumer project.
+4. Compare metrics against baseline; apply threshold rules.
+5. Report status, deltas, and violations.
+
+**When to use:** Default behavior. Run after every meaningful change to the consumer code or documents.
 
 ### `update` — Conditional Baseline Update
 
-Updates the baseline only if PASS criteria are met AND thresholds are exceeded.
+Updates the baseline only when **both** conditions hold:
 
-**When to use:** When user explicitly requests baseline update after confirming new baseline is acceptable.
+- Current run is PASS (zero failures, no build/validate errors, no lint errors)
+- At least one metric exceeds its threshold (so the update represents a real shift, not noise)
 
-**Workflow:**
-```
-Build → Test_Backend → Test_Frontend → Evaluate → (PASS + threshold exceeded?) → Update : No Update
-```
+Workflow:
 
-**Actions:**
-1. Parse current baseline marker (e.g., `BL-001`)
-2. Increment marker to next version (e.g., `BL-002`)
-3. Auto-generate one-sentence changelog summary based on which thresholds were exceeded
-4. Append new changelog entry, prune to last 10 entries (FIFO)
-5. Update `LastUpdated` timestamp
-6. Save updated `testing-baseline.xml`
+1. Increment the baseline marker (`BL-001` → `BL-002`, etc.)
+2. Generate a one-sentence changelog summary naming which thresholds crossed
+3. Append a new `<Changelog><Entry>`; **never modify prior entries**
+4. Prune the changelog to the last 10 entries (FIFO)
+5. Update `<Metadata.LastUpdated>` and write the file
 
-## Baseline File Discovery
-
-Files are expected at the consumer project root. If not found:
-
-1. Check working directory for `testing-protocol.md` and `testing-baseline.xml`
-2. Search upward to nearest `.git` parent directory
-3. If files exist elsewhere in the repo, use them and warn the user
-4. If files are missing, prompt user to run `init`
+**When to use:** When the user explicitly requests a baseline update after confirming the new numbers are acceptable.
 
 ## Pass Criteria
 
-All tests pass (0 failures), no build errors, no linting errors.
+All checks pass: zero failures, zero build/validate errors, zero lint errors. Numeric thresholds in the protocol refine this baseline (e.g. pass rate ≥ 90%, coverage ≥ threshold).
 
 ## Zero Tolerance Rules
 
-- **No real APIs in tests** — All external dependencies must be mocked
-- **Domain isolation** — ZERO external network dependencies in test suite
-- **Stop on failure** — Immediately halt execution on test failure
+- **No real APIs in tests** — every external dependency is mocked or stubbed.
+- **Domain Isolation** — domain-tier tests run with **zero** external dependencies, zero mocks. Domain logic is pure.
+- **Stop on failure** — on any test failure, halt the pipeline immediately.
 
 ## Execution Workflow
 
-### Stage 1: Build
+The protocol file is authoritative; the stages below are the canonical shape, not a substitute for the file.
 
-1. Build backend (compile, lint check)
-2. Build frontend (compile, lint check)
-3. Abort pipeline if either build fails
+### Stage 1: Build (or Validate)
 
-### Stage 2: Test Backend
+Compile and lint. For non-code consumers, run the project's validators (markdownlint, schema validators, custom checks).
 
-1. Execute backend test suite with coverage collection
-2. Record metrics: test count, pass count, fail count, pass rate, coverage %, duration
+### Stage 2: Per-Tier Tests
 
-### Stage 3: Test Frontend
+For each tier named in the protocol:
 
-1. Execute frontend unit tests with coverage collection
-2. Execute frontend e2e tests
-3. Record metrics: test count, pass count, fail count, pass rate, coverage %, duration
+1. Execute the tier's test command with coverage collection.
+2. Record: test count, pass count, fail count, pass rate, coverage %, duration.
 
-### Stage 4: Evaluate
+### Stage 3: Evaluate
 
-Compare current metrics against baseline and apply threshold matrix.
+Apply the protocol's `pass_fail_criteria` and `baseline_thresholds`. Produce:
 
-### Stage 5: Decision
+- **Status**: PASS or FAIL
+- **Violations**: each metric whose delta crossed its threshold
+- **Delta**: per-metric change vs baseline
 
-Based on evaluation results, determine next action (see Decision Matrix below).
-
-## Baseline XML Structure
-
-```xml
-<?xml version="1.0" encoding="utf-8"?>
-<TestingBaseline>
-  <Metadata>
-    <LastUpdated>YYYY-MM-DDTHH:MM:SSZ</LastUpdated>
-    <BaselineId>BL-001</BaselineId>
-    <Framework>Generic Multi-Stack</Framework>
-  </Metadata>
-  <Backend>
-    <!-- backend metrics -->
-  </Backend>
-  <Frontend>
-    <!-- frontend metrics -->
-  </Frontend>
-  <Changelog>
-    <Entry>
-      <BaselineId>BL-001</BaselineId>
-      <Date>YYYY-MM-DD</Date>
-      <ChangeSummary>Initial baseline created</ChangeSummary>
-    </Entry>
-  </Changelog>
-</TestingBaseline>
-```
-
-## Baseline Marker & Changelog
-
-### Marker Format
-- Pattern: `BL-NNN` (3-digit, zero-padded: `BL-001`, `BL-002`, ... `BL-999`)
-- Set on `init` to `BL-001`
-- Incremented on each `update` command
-
-### Changelog Entry Structure
-- `<BaselineId>`: The marker for this baseline version
-- `<Date>`: ISO date when baseline was created
-- `<ChangeSummary>`: Auto-generated one-sentence summary of reason for new baseline
-
-### Changelog Summary Generation
-The skill auto-generates the summary based on which thresholds were exceeded:
-
-| Scenario | Example Summary |
-|----------|-----------------|
-| User requested | "User requested baseline update" |
-| Test count change | "Test count increased by X%, thresholds exceeded" |
-| Coverage change | "Coverage improved by X%, thresholds exceeded" |
-| Multiple thresholds | "Test count +X%, coverage +Y%, build time +Z%, thresholds exceeded" |
-
-**CRITICAL:** Existing changelog entries must NEVER be modified -- only append new entries.
-
-### Changelog Pruning
-- Maximum 10 entries retained
-- When limit is exceeded, oldest entry is removed (FIFO)
-
-## Threshold Matrix
-
-| Metric | Threshold | Direction |
-|--------|-----------|-----------|
-| Test count | > 10% change | Any |
-| Pass rate | > 10% change | Any |
-| Build time | > 10% increase | Up only |
-| Coverage (backend) | > 5% change | Any |
-| Coverage (frontend) | > 5% drop | Down only |
-| Test duration (frontend) | > 20% increase | Up only |
-| Artifact size | > 10% change | Any |
-
-## Decision Matrix
-
-| Test Result | Threshold Exceeded | Action |
-|-------------|---------------------|--------|
-| PASS | Yes | Update baseline |
-| PASS | No | No update (acceptable) |
-| FAIL | Yes | No update (report first) |
-| FAIL | No | No update (report first) |
-
-### Decision Logic
+### Stage 4: Decision
 
 ```
 IF test_result == PASS AND threshold_exceeded == TRUE:
     → UPDATE baseline
-    → Report metrics with delta
-
+    → Report metrics with deltas
 ELIF test_result == PASS AND threshold_exceeded == FALSE:
-    → NO UPDATE needed
-    → Report "within threshold"
-
+    → NO UPDATE needed; report "within threshold"
 ELIF test_result == FAIL:
     → STOP immediately
     → REPORT failure details
@@ -223,54 +160,73 @@ ELIF test_result == FAIL:
     → Re-run evaluation
 ```
 
+## Baseline XML Structure
+
+The XML holds **only** what the protocol declares. Adapt the template (`templates/testing-baseline.xml`) to the consumer's actual tiers — the placeholders for `<Backend>` / `<Frontend>` are examples, not requirements.
+
+## Baseline Marker & Changelog
+
+- Marker: `BL-NNN`, zero-padded (`BL-001`, `BL-002`, … `BL-999`).
+- `init` sets `BL-001`. Each `update` increments.
+- Changelog entries: `<BaselineId>`, `<Date>`, `<ChangeSummary>`. Append-only — never edit prior entries.
+- Changelog auto-pruned to last 10 entries (FIFO).
+
+## Threshold Matrix (defaults — protocol overrides)
+
+| Metric | Threshold | Direction |
+|--------|-----------|-----------|
+| Test count | > 10% change | Any |
+| Pass rate | > 10% change | Any |
+| Build time | > 10% increase | Up only |
+| Coverage | > 5% change | Any |
+| Test duration | > 20% increase | Up only |
+| Artifact size | > 10% change | Any |
+
+The protocol's `baseline_thresholds` table is the live source. These defaults exist only to seed an empty protocol.
+
+## Output Format
+
+Every eval reports:
+
+- **Status**: PASS / FAIL
+- **Per-tier summary**: counts, pass rate, duration
+- **Threshold evaluation**: which metrics exceeded
+- **Delta from baseline**: +/- change per metric
+- **Recommendation**: update baseline (if applicable), or fix required
+
 ## Stop-Failure Protocol
 
-When tests fail:
+When any check fails:
 
-1. **STOP** — Immediately halt further test execution
-2. **REPORT** — Provide detailed failure output (test name, message, stack trace)
-3. **PLAN** — Outline approach to fix failures
-4. **APPROVAL** — Wait for user confirmation before proceeding with fixes
-5. **FIX** — Implement corrections
+1. **STOP** — halt further execution
+2. **REPORT** — test/check name, message, stack/output
+3. **PLAN** — outline the fix approach
+4. **APPROVAL** — wait for user confirmation
+5. **FIX** — implement corrections
+6. **Re-run** the eval
 
 ## Error Handling
 
 | Scenario | Response |
 |----------|----------|
-| Protocol file missing | Prompt user to run `init` command |
-| Baseline file missing | Prompt user to run `init` command |
-| Build failure | Report build errors, do not proceed to tests |
-| Test framework unavailable | Report error, do not proceed |
-| Invalid baseline XML | Warn user, offer to regenerate |
-| Files in non-standard location | Warn user, proceed with located files |
-
-## Output Format
-
-Report should include:
-
-- **Status**: PASS / FAIL
-- **Test summary**: counts, pass rate, duration per layer
-- **Threshold evaluation**: which metrics exceeded (if any)
-- **Delta from baseline**: +/- change for each metric
-- **Recommendation**: update baseline (if applicable) or fix required
-
-## Template Files
-
-The `templates/` directory contains the baseline and protocol templates used during `init`:
-
-| Template | Purpose |
-|----------|---------|
-| `templates/testing-baseline.xml` | Baseline XML structure for metrics and changelog |
-| `templates/testing-protocol.md` | Protocol definition with workflow and thresholds |
-
-These templates are copied to the consumer project root during the `init` command.
+| Protocol file missing | Run `init` (grill the user for tiers first) |
+| Baseline file missing | Run `init` |
+| Build / validate failure | Report errors; do not proceed to tests |
+| Framework unavailable | Report; do not proceed |
+| Invalid XML | Warn, offer to regenerate via `init` |
+| Files in non-standard location | Warn, proceed with located files |
 
 ## Integration Notes
 
-This skill is backend/frontend agnostic. Implementation should:
-- Adapt build commands to project type (dotnet, npm, maven, gradle, etc.)
-- Adapt test commands to test framework (xunit, jest, vitest, pytest, etc.)
-- Adapt coverage tools to language/platform
-- Preserve the threshold rules and decision matrix exactly
-- Maintain the baseline XML schema structure for portability
-- Read `testing-protocol.md` from consumer project for workflow definitions
+This skill is tier-agnostic. Implementation adapts to whatever tiers and tools the consumer's protocol declares. Never assume "backend = dotnet, frontend = npm" — the protocol is the truth.
+
+## OpenCode
+
+OpenCode-specific bindings for this skill:
+
+- **Slash command** — `/test-baseline init|eval|update` routes through the `explore` agent with `subtask: true`. The command body loads this skill via the `loadSkill` tool.
+- **Skill allowlist** — `plugin.ts` sets `agent.explore.permission.skill["test-baselining"] = "allow"` so the explore subagent can reach this skill without a prompt.
+- **Install layout** — OpenCode's plugin harness copies this skill to `.opencode/skills/test-baselining/` (project) or `~/.config/opencode/skills/test-baselining/` (global). A `.version` marker next to `SKILL.md` drives idempotent reinstalls.
+- **Asset reuse** — Both `test-baselining` and `regression-checking` are model-invoked skills (they each carry a `description`) so any subagent that loads them can chain the other. `regression-checking` calls `loadSkill({ name: "test-baselining" })` to reuse this skill's execution workflow.
+
+For non-OpenCode agents (Claude Code, etc.), the same `SKILL.md` and command markdown files work — the frontmatter fields OpenCode adds (`agent`, `subtask`) are ignored, and `loadSkill` resolves through the agent's own skill loader.
