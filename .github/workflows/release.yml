@@ -30,11 +30,11 @@ jobs:
       version: ${{ steps.parse-version.outputs.version }}
     steps:
       - name: Checkout
-        if: github.event_name == '\''push'\''
+        if: ${{ github.event_name == 'push' }}
         uses: actions/checkout@v4
 
       - name: Checkout at ref
-        if: github.event_name == '\''workflow_dispatch'\''
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref }}
@@ -63,7 +63,8 @@ jobs:
             for (const section of sections) {
               const m = section.match(/^## \[([^\]]+)\].*?-\s*(\d{4}-\d{2}-\d{2})/s);
               if (m && m[1].replace(/^v/, '') === version) {
-                notes = section.replace(/^## \[[^\]]+\].*?-\s*\d{4}-\d{2}-\d{2}\n/, '').trim();
+                notes = section.replace(/^## \[[^\]]+\].*?-\s*\d{4}-\d{2}-\d{2}
+/, '').trim();
                 found = true;
                 break;
               }
@@ -73,7 +74,8 @@ jobs:
               process.exit(1);
             }
             fs.writeFileSync('RELEASE_NOTES.md', notes);
-            console.log('Extracted', notes.split('\n').length, 'lines for version', version);
+            console.log('Extracted', notes.split('
+').length, 'lines for version', version);
           "
 
       - name: Create GitHub Release
