@@ -4,6 +4,18 @@ import { join } from "node:path";
 
 export type Scope = "local" | "global";
 
+export class ScopeResolver {
+  static resolve(directory: string, globalConfigPath: string): Scope {
+    const isExact = directory === globalConfigPath;
+    const isUnderForward = directory.startsWith(globalConfigPath + "/");
+    const isUnderBack = directory.startsWith(globalConfigPath + "\\");
+    if (isExact || isUnderForward || isUnderBack) {
+      return "global";
+    }
+    return "local";
+  }
+}
+
 export interface InstallOptions {
   addPluginConfig?: boolean;
 }
@@ -373,4 +385,32 @@ export async function status(projectDir: string = process.cwd()): Promise<Status
     local: localStatus,
     global: globalStatus,
   };
+}
+
+export async function isLocalInstalled(projectDir: string): Promise<boolean> {
+  const localConfigPath = getLocalConfigPath(projectDir);
+  const localMarker = join(localConfigPath, "skills", "test-baselining", ".version");
+  try {
+    await Bun.file(localMarker).text();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function readLocalConfig(projectDir: string): Promise<Record<string, unknown> | null> {
+  const localConfigPath = join(getLocalConfigPath(projectDir), "opencode.json");
+  return readJsonConfig(localConfigPath);
+}
+
+export function mergeConfigWithOverrides(
+  input: Record<string, unknown>,
+  localConfig: Record<string, unknown>
+): void {
+  for (const [key, value] of Object.entries(localConfig)) {
+    if (key === "plugin" || key === "agent") {
+      continue;
+    }
+    input[key] = value;
+  }
 }
