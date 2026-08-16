@@ -6,6 +6,7 @@ import plugin from "../plugin.ts";
 const TEST_DIR = join(import.meta.dirname, ".test-temp");
 
 beforeAll(async () => {
+  await rm(TEST_DIR, { recursive: true }).catch(() => {});
   await mkdir(TEST_DIR, { recursive: true });
 });
 
@@ -24,8 +25,8 @@ describe("TestBaseliningPlugin", () => {
   test("installs skills and commands to target directory", async () => {
     // @ts-ignore - PluginInput requires full context, we only need directory
     const result = await plugin({ directory: TEST_DIR });
-    // @ts-ignore - config returns async function
-    await (result.config as (() => Promise<void>) | undefined)?.();
+    // @ts-ignore - config returns async function that takes Config argument
+    await (result.config as ((input: unknown) => Promise<void>) | undefined)?.({});
 
     const skillPath = join(TEST_DIR, ".opencode", "skills", "test-baselining", "SKILL.md");
     const commandPath = join(TEST_DIR, ".opencode", "commands", "test-baseline.md");

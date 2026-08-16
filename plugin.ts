@@ -1,11 +1,22 @@
-import type { Plugin } from "@opencode-ai/plugin";
+import type { Plugin, Config } from "@opencode-ai/plugin";
 import { install, getGlobalConfigPath, getLocalConfigPath, getPackageVersion, type Scope } from "./src/installer.ts";
 import { join } from "node:path";
 
 const SKILL_NAMES = ["test-baselining", "regression-checking"] as const;
 
+function setExploreSkillPermissions(input: Config): void {
+  input.agent ??= {};
+  input.agent.explore ??= {};
+  input.agent.explore.permission ??= {};
+  const perm = input.agent.explore.permission as Record<string, unknown>;
+  perm.skill ??= {};
+  const skillPerm = perm.skill as Record<string, string>;
+  skillPerm["test-baselining"] = "allow";
+  skillPerm["regression-checking"] = "allow";
+}
+
 const plugin: Plugin = async ({ directory }) => ({
-  config: async () => {
+  config: async (input: Config) => {
     const version = await getPackageVersion();
     const globalConfigPath = getGlobalConfigPath();
     const globalVersionMarker = join(globalConfigPath, "skills", "test-baselining", ".version");
@@ -22,12 +33,24 @@ const plugin: Plugin = async ({ directory }) => ({
       try {
         const globalVersion = (await Bun.file(globalVersionMarker).text()).trim();
         if (globalVersion === version) {
-          return;
+          const localMarker = join(directory, ".opencode", "skills", "test-baselining", ".version");
+          try {
+            const installedVersion = (await Bun.file(localMarker).text()).trim();
+            if (installedVersion === version) {
+              setExploreSkillPermissions(input);
+              return;
+            }
+          } catch {
+            // Local not installed, proceed with local install
+          }
+          scope = "local";
+        } else {
+          scope = "local";
         }
       } catch {
         // Global not installed, proceed with local
+        scope = "local";
       }
-      scope = "local";
     }
 
     const marker = scope === "global"
@@ -37,6 +60,7 @@ const plugin: Plugin = async ({ directory }) => ({
     try {
       const installedVersion = (await Bun.file(marker).text()).trim();
       if (installedVersion === version) {
+        setExploreSkillPermissions(input);
         return;
       }
     } catch {
@@ -54,6 +78,8 @@ const plugin: Plugin = async ({ directory }) => ({
     if (result.migrated) {
       console.log(`  Migrated: opencode.json → .opencode/opencode.json`);
     }
+
+    setExploreSkillPermissions(input);
   },
 });
 
