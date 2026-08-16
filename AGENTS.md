@@ -68,3 +68,17 @@ After `/test-baseline init`, these files appear at the consumer project root:
 - Changelog auto-generates summaries based on which thresholds were exceeded
 - `regression-checking` delegates to `test-baselining` and reads `testing-protocol.md` for threshold interpretation
 - Commands route to explore subagent by default (clean isolation)
+
+## Agent skills
+
+### Issue tracker
+
+Issues live as GitHub issues; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role triage vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
