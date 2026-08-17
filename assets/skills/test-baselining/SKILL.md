@@ -1,6 +1,11 @@
 ---
 name: test-baselining
 description: Test execution, baseline management, and threshold evaluation for quality gates. Use when running tests, evaluating against baseline, or updating baselines in a consumer project. Reads testing-protocol.md from the consumer project root for workflow and threshold definitions.
+
+# Optional soft dependencies — loaded via `loadSkill` at runtime when the
+# `init` "can't infer" trigger fires. Not enforced by any host; purely
+# advisory metadata for human and agent readers scanning the frontmatter.
+requires-optional: [grilling]
 ---
 
 # Test Baselining
@@ -48,6 +53,35 @@ Build the consumer's first `testing-protocol.md` and `testing-baseline.xml` from
 
 - **Code project** — has a toolchain (build commands, test commands, coverage tooling). Proceed to Step 2.
 - **Non-code project** — repo of documents, configs, books, policies, data. Proceed to Step 2 anyway; the "tiers" become document classes or verification passes, and "tests" become deterministic checks (linters, validators, schema checks, count rules). Skip the build stage; the Build step becomes `validate`.
+
+**Step 1.5 — detect "can't infer" trigger.** Before grilling on tier dimensions, decide whether the tier set is inferable from the consumer's actual files. The fallback to `grilling` fires when **either** condition holds:
+
+- **(A) No recognizable manifest at the source-control working-tree root.** None of `package.json`, `*.csproj`, `Cargo.toml`, `pyproject.toml`, `go.mod`, `pom.xml`, `build.gradle*`, `manifest.json`, `composer.json`, `pubspec.yaml`, `mix.exs`, `Gemfile`, `deno.json*` is present. (See `refs/source-controls.md` for working-tree-root lookup.)
+- **(B) Tier grill fails to converge.** The six questions in Step 2 can't be answered in one pass — the user can't name the tier set, the toolchain, or the build-artifact directory from the available files.
+
+If either condition holds, **delegate the interview to the `grilling` skill**:
+
+1. **Prefer permanent install.** Probe `<configBase>/skills/grilling/` (the active agent's standard skills root). If present, call `tool loadSkill({ name: "grilling" })` and follow the loaded skill's body.
+2. **Otherwise one-shot.** If not present, shell out: `CI=true npx -y skills use mattpocock/skills --skill grilling`. Capture stdout (the generated prompt), treat it as the interview protocol, and follow it inline.
+3. **Otherwise fall through.** If `npx` fails (no network, no node, user denied), the agent drops back to the inline Step 2 grill table and asks the user directly. The chain is best-effort, never load-bearing.
+
+After `grilling` resolves the design tree, capture the resolved tier set, toolchain, and artifact directory from the grill output and resume Step 2 with those as inputs — do not re-ask settled questions.
+
+> **Source.** `grilling` is not shipped by this plugin. Fetch on demand with:
+>
+> ```
+> CI=true npx -y skills use mattpocock/skills --skill grilling
+> ```
+>
+> Or install permanently (default agent `universal` if unknown):
+>
+> ```
+> npx -y skills add mattpocock/skills --skill grilling -a universal
+> ```
+>
+> If neither path is reachable (no `npx`, no network, no install), the
+> `loadSkill` call is a no-op and the agent falls through to the inline
+> Step 2 table — the chain is best-effort, never load-bearing.
 
 **Step 2 — discover tiers.** Grilling is mandatory whenever tiers are not obvious. **Before grilling**, consult the bundled init-time references so the questions are grounded in the project's actual stack — not in template defaults:
 
@@ -257,6 +291,7 @@ OpenCode-specific bindings for this skill:
 
 - **Slash command** — `/test-baseline init|eval|update` routes through the `explore` agent with `subtask: true`. The command body loads this skill via the `loadSkill` tool.
 - **Skill allowlist** — `plugin.ts` sets `agent.explore.permission.skill["test-baselining"] = "allow"` so the explore subagent can reach this skill without a prompt.
+- **Optional skill chain** — `init` may invoke `loadSkill({ name: "grilling" })` when no manifest is present (A) or the inline tier grill fails to converge (B). The chain is best-effort; a missing skill falls through to the inline Step 2 table. `plugin.ts` adds `grilling` to `agent.explore.permission.skill` alongside `test-baselining` and `regression-checking` — the entry is harmless if the skill isn't installed; OpenCode consults the allowlist only when the loadSkill tool is actually invoked.
 - **Install layout** — OpenCode's plugin harness copies this skill to `.opencode/skills/test-baselining/` (project) or `~/.config/opencode/skills/test-baselining/` (global). A `.version` marker next to `SKILL.md` drives idempotent reinstalls.
 - **Asset reuse** — Both `test-baselining` and `regression-checking` are model-invoked skills (they each carry a `description`) so any subagent that loads them can chain the other. `regression-checking` calls `loadSkill({ name: "test-baselining" })` to reuse this skill's execution workflow.
 

@@ -309,10 +309,12 @@ export async function install(
   }
 
   const aureliaCheck = await detectAurelia(projectDir);
+  const optionalSkillRecs = await detectOptionalSkills(configBase);
   const recommendations: string[] = [];
   if (aureliaCheck.detected) {
     recommendations.push(aureliaCheck.message);
   }
+  recommendations.push(...optionalSkillRecs);
 
   return {
     scope,
@@ -462,6 +464,32 @@ export async function detectAurelia(projectDir: string): Promise<AureliaRecommen
   ].join("\n");
 
   return { detected: true, message };
+}
+
+export async function detectOptionalSkills(configBase: string): Promise<string[]> {
+  const recs: string[] = [];
+
+  // `grilling` — used by /test-baseline init when tiers can't be inferred
+  // (no manifest at the source-control root, or the inline tier grill fails to
+  // converge). Not shipped by this plugin; fetched on demand via the consumer
+  // running `npx -y skills use` (one-shot) or `npx -y skills add` (permanent).
+  const grillingPath = join(configBase, "skills", "grilling");
+  if (!(await exists(grillingPath))) {
+    recs.push(
+      [
+        "Optional skill not detected: `grilling`",
+        "  Purpose: interview loop for `/test-baseline init` when the consumer has no recognizable manifest or its tier set can't be inferred.",
+        "  Source:  github.com/mattpocock/skills (MIT). Not shipped by this plugin.",
+        "  One-shot (no permanent install — init captures the generated prompt):",
+        "    CI=true npx -y skills use mattpocock/skills --skill grilling",
+        "  Permanent install (default agent `universal` if your agent is unknown):",
+        "    npx -y skills add mattpocock/skills --skill grilling -a universal",
+        "  After a permanent install, `loadSkill({ name: \"grilling\" })` resolves directly from the agent's skills path.",
+      ].join("\n")
+    );
+  }
+
+  return recs;
 }
 
 export async function isLocalInstalled(projectDir: string): Promise<boolean> {

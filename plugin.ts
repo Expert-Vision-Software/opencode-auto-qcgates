@@ -2,7 +2,7 @@ import type { Plugin, Config } from "@opencode-ai/plugin";
 import { install, getGlobalConfigPath, getPackageVersion, ScopeResolver, isLocalInstalled, readLocalConfig, mergeConfigWithOverrides, printRecommendations } from "./src/installer.ts";
 import { join } from "node:path";
 
-const SKILL_NAMES = ["test-baselining", "regression-checking"] as const;
+const SKILL_NAMES = ["test-baselining", "regression-checking", "grilling"] as const;
 
 function setExploreSkillPermissions(input: Config): void {
   input.agent ??= {};
@@ -13,6 +13,11 @@ function setExploreSkillPermissions(input: Config): void {
   const skillPerm = perm.skill as Record<string, string>;
   skillPerm["test-baselining"] = "allow";
   skillPerm["regression-checking"] = "allow";
+  // `grilling` is an optional chain from test-baselining init (see
+  // assets/skills/test-baselining/SKILL.md Step 1.5). The entry is harmless
+  // if grilling is not installed; OpenCode consults the allowlist only when
+  // the loadSkill tool is actually invoked.
+  skillPerm["grilling"] = "allow";
 }
 
 const plugin: Plugin = async ({ directory }) => ({
