@@ -1,45 +1,41 @@
 ---
 name: regression-checking
-description: Quality regression detection for autonomous agents and human reviewers. Answers "did we break anything?", "should I proceed or stop?", "is it safe to commit?" by analyzing test results against baseline. Activates proactively after agent changes or reactively when quality questions are asked.
+description: Quality regression detection for autonomous agents and human reviewers. Use when answering "did we break anything?", "should I proceed or stop?", or "is it safe to commit?". Interprets test-baselining results against baseline; emits PROCEED / STOP / REVIEW decision signals for agents.
 ---
 
-# Regression Checking Skill
+# Regression Checking
 
-A decision-support skill that interprets test-baselining results to answer quality regression questions for both humans and autonomous agents.
+A decision-support skill that interprets `test-baselining` results to answer quality regression questions for both humans and autonomous agents. Body is agent-agnostic; OpenCode-specific bindings are noted in the last section.
 
 ## Purpose
 
-Provides quality regression intelligence on top of test-baselining:
+Provides quality-regression intelligence on top of `test-baselining`:
 
-- **Answer quality questions** in plain language: "Did we break anything?", "Is it safe to proceed?", "Should I commit?"
-- **Guide autonomous agents** with structured decision signals: PROCEED / STOP / REVIEW
-- **Translate metrics into risk**: Convert threshold deltas into human-readable risk assessments
-- **Enable self-evaluation**: Agents can check themselves before declaring task completion
+- Answer quality questions in plain language: "Did we break anything?", "Is it safe to proceed?", "Should I commit?"
+- Guide autonomous agents with structured decision signals: `PROCEED` / `STOP` / `REVIEW`
+- Translate metric deltas into risk assessments humans can scan
+- Enable self-evaluation: agents check themselves before declaring a task complete
 
 ## Context Reuse
 
-Loads the `test-baselining` skill to reuse its operational details without duplication:
+This skill **does not run tests directly**. It loads `test-baselining` for execution and reads the consumer's `testing-protocol.md` for thresholds.
 
-```
-!`tool loadSkill({ name: "test-baselining" })`
-```
-
-This skill focuses on **interpretation and decision**, while `test-baselining` handles **execution and comparison**.
+Loading the upstream skill is the agent's own mechanism (e.g. `loadSkill({ name: "test-baselining" })` on OpenCode, the equivalent on Claude Code or other dot-agents agents). The body assumes it is loaded; it does not assume any specific loader syntax.
 
 ## Activation Triggers
 
 ### Proactive
 
-- **After agent task completion**: Run regression check before reporting done
-- **Before commit/push**: Verify quality before proposing changes
-- **On large change detection**: When git diff exceeds certain threshold
+- After an agent task completes: run the regression check before reporting done.
+- Before commit / push: verify quality before proposing changes.
+- On large change detection: when the change surface exceeds a protocol-defined threshold.
 
 ### Reactive
 
 These question patterns activate the skill:
 
-| Question Pattern | Intent |
-|-----------------|--------|
+| Question | Intent |
+|----------|--------|
 | "Did we break anything?" | Detect regressions |
 | "Should I proceed or stop?" | Agent decision guidance |
 | "Is it safe to commit?" | Pre-commit quality check |
@@ -52,22 +48,30 @@ These question patterns activate the skill:
 ## Execution Flow
 
 ```
-1. Determine if fresh eval needed
-   ├─ Check git diff since last eval
-   ├─ If no changes → use cached results
+1. Determine if a fresh eval is needed
+   ├─ Check the consumer's source control for changes since the last eval
+   ├─ If no changes → reuse cached results
    └─ If changes exist → run test-baselining eval
 
-2. Load test-baselining skill and run eval
+   (The "Check source control" step is VCS-agnostic at the body level. See
+   test-baselining's refs/source-controls.md for the per-VCS lookup — git,
+   Mercurial, Subversion, Pijul, Fossil, Unity VCS, Perforce, Bazaar, Darcs.
+   Run the right "has changes?" command for whatever source control the
+   consumer uses; if the VCS tool isn't on PATH, fall back to an mtime scan
+   and flag the fallback in the output.)
+
+2. Load test-baselining (via the agent's skill loader) and run `eval`
 
 3. Read testing-protocol.md for thresholds and pass/fail criteria
+   - Use the location rules from test-baselining's "Locating the Consumer Files"
 
-4. Interpret results through risk lens:
-   ├─ Parse PASS/FAIL status using pass_fail_criteria
-   ├─ Analyze threshold deltas against baseline_thresholds
+4. Interpret results through the risk lens:
+   ├─ Parse PASS / FAIL using pass_fail_criteria
+   ├─ Analyze threshold deltas against baseline_thresholds, including build-artifact deltas
    ├─ Map deltas to risk levels
-   └─ Identify specific violations
+   └─ Identify specific violations (artefact-size violations count, even when tests pass)
 
-5. Generate outputs:
+5. Emit:
    ├─ Human-readable quality narrative
    └─ Structured agent decision signal
 ```
@@ -78,16 +82,16 @@ To avoid unnecessary test runs:
 
 | Scenario | Action |
 |----------|--------|
-| No git changes since last eval | Reuse last eval results |
-| Untracked/changed files exist | Run fresh eval |
+| No source-control changes since last eval | Reuse last eval results |
+| Untracked / changed files exist | Run fresh eval |
 | Baseline file missing | Prompt to run `test-baselining init` |
 | Eval older than 1 hour | Run fresh eval (staleness check) |
+
+**`No source-control changes`** is VCS-agnostic at the body level. The concrete command and stable hash for the cache key differ per VCS — consult `test-baselining`'s `refs/source-controls.md` to pick the right "has changes?" probe (e.g. `git status --porcelain` + HEAD SHA for Git, `cm status --short` + working changeset for Unity VCS, `p4 status -A` + `p4 have` revision for Perforce). When the VCS tool is missing from PATH, fall back to a recursive `find -newer` scan and **flag the fallback in the eval output** — the cache is then advisory, not authoritative.
 
 ## Decision Output
 
 ### Human-Readable Narrative
-
-When answering quality questions, output a structured report:
 
 ```
 Regression Check: PASS (with caveats) / FAIL / PASS
@@ -109,20 +113,18 @@ Do not commit until status is PASS.
 
 ### Structured Agent Signal
 
-For autonomous agent decision-making, output a machine-parseable signal:
-
 ```
 {
-  decision: "REVIEW",     // PROCEED | STOP | REVIEW
-  status: "FAIL",        // PASS | FAIL
-  summary: "3 tests failed, coverage dropped 4%, build time +18%",
-  violations: [
-    { metric: "coverage", current: "78%", baseline: "82%", delta: "-4%", threshold: "5%", severity: "medium" },
-    { metric: "build_time", current: "45s", baseline: "38s", delta: "+18%", threshold: "10%", severity: "high" }
+  "decision": "REVIEW",     // PROCEED | STOP | REVIEW
+  "status": "FAIL",         // PASS | FAIL
+  "summary": "3 tests failed, coverage dropped 4%, build time +18%",
+  "violations": [
+    { "metric": "coverage", "current": "78%", "baseline": "82%", "delta": "-4%", "threshold": "5%", "severity": "medium" },
+    { "metric": "build_time", "current": "45s", "baseline": "38s", "delta": "+18%", "threshold": "10%", "severity": "high" }
   ],
-  risk_level: "medium",   // low | medium | high | critical
-  approval_required: true,
-  next_actions: [
+  "risk_level": "medium",   // low | medium | high | critical
+  "approval_required": true,
+  "next_actions": [
     "Fix failing tests",
     "Investigate coverage drop",
     "Re-run regression check after fixes"
@@ -132,62 +134,54 @@ For autonomous agent decision-making, output a machine-parseable signal:
 
 ### Decision Definitions
 
-| Decision | Trigger Condition | Agent Behavior |
-|----------|------------------|----------------|
+| Decision | Trigger | Agent behavior |
+|----------|---------|----------------|
 | **PROCEED** | PASS + no violations + low risk | Continue to next task or commit |
-| **STOP** | FAIL + critical/high violations | Halt, report, await human approval |
-| **REVIEW** | FAIL + medium/low violations, OR PASS + violations | Report and recommend specific fixes |
+| **STOP** | FAIL + critical / high violations | Halt, report, await human approval |
+| **REVIEW** | FAIL + medium / low violations, OR PASS + violations | Report and recommend specific fixes |
 
 ### Risk Level Mapping
 
-| Condition | Risk Level |
-|-----------|------------|
-| PASS + no violations | **low** |
-| PASS + minor violations | **medium** |
-| FAIL + test failures | **high** |
-| FAIL + test failures + multiple violations | **critical** |
+| Condition | Risk |
+|-----------|------|
+| PASS + no violations | low |
+| PASS + minor violations | medium |
+| FAIL + test failures | high |
+| FAIL + test failures + multiple violations | critical |
 
 ## Quality Narrative Format
 
-For human reviewers, present information in this order:
+Present information in this order:
 
-1. **Status badge**: PASS / FAIL / REVIEW
-2. **Test summary**: counts, pass rate
-3. **Key metric deltas**: coverage, build time, duration
-4. **Threshold violations**: specific metrics that exceeded limits
-5. **Risk assessment**: one-line summary
-6. **Recommendation**: clear action statement
+1. **Status badge** — PASS / FAIL / REVIEW
+2. **Test summary** — counts, pass rate
+3. **Key metric deltas** — coverage, build time, duration
+4. **Threshold violations** — specific metrics that exceeded limits
+5. **Risk assessment** — one-line summary
+6. **Recommendation** — clear action statement
 
-Keep it scannable. Use visual indicators:
+Use visual indicators:
 - ✓ for improvements within threshold
-- ▼/▲ for negative/positive deltas
+- ▼ / ▲ for negative / positive deltas
 - ▲▲ for exceeded thresholds
 
 ## Protocol File Reference
 
-The `testing-protocol.md` at the consumer project root contains threshold and pass/fail criteria that drive regression decisions.
-
-**Read these sections from `testing-protocol.md`:**
+`testing-protocol.md` at the consumer project root drives regression decisions. The location rules from `test-baselining`'s **Locating the Consumer Files** apply — read them once and follow.
 
 | Section | Usage |
 |---------|-------|
-| `pass_fail_criteria` | Determine what constitutes PASS vs FAIL for backend and frontend |
+| `pass_fail_criteria` | Determine what counts as PASS vs FAIL per tier |
 | `baseline_thresholds` | Map metric deltas to threshold violations |
 | `decision_matrix` | Map baseline state transitions to update decisions |
 
-**Threshold format from protocol:**
-```
-| Metric | Threshold | Direction |
-|--------|-----------|-----------|
-| Test count | > 10% change | Any |
-| Coverage | > 5% change | Any |
-| Build time | > 10% increase | Up only |
-```
+## OpenCode
 
-## Integration Notes
+OpenCode-specific bindings for this skill:
 
-This skill does not run tests directly — it delegates to `test-baselining` and interprets the results.
+- **Slash command** — `/regression-check` (or `/regression-check status` for a quick check without a full eval) routes through the `explore` agent with `subtask: true`. The command body loads this skill via the `loadSkill` tool.
+- **Skill allowlist** — `plugin.ts` sets `agent.explore.permission.skill["regression-checking"] = "allow"` so the explore subagent can reach this skill without a prompt.
+- **Skill chain** — OpenCode's `loadSkill({ name: "test-baselining" })` call inside this skill reuses the same install location and permission allowlist, so the chain works without extra config.
+- **Install layout** — OpenCode's plugin harness copies this skill to `.opencode/skills/regression-checking/` (project) or `~/.config/opencode/skills/regression-checking/` (global). A `.version` marker drives idempotent reinstalls.
 
-The skill is project-type agnostic and works with any stack supported by `test-baselining` (.NET, Node, Python, etc.).
-
-For agents: emit the structured signal at the end of every regression check so parent agents can make decisions without parsing the narrative.
+For non-OpenCode agents (Claude Code, etc.), the same `SKILL.md` works — frontmatter fields OpenCode adds are ignored, and the agent's own skill loader handles loading `test-baselining`.

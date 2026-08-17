@@ -2,6 +2,7 @@ import { select } from "@inquirer/prompts";
 import {
   install,
   checkMigrationNeeded,
+  printRecommendations,
   type Scope,
   type InstallOptions,
 } from "../installer.ts";
@@ -84,4 +85,6 @@ export async function installCommand(options: InstallCommandOptions): Promise<vo
   if (result.pluginAdded) {
     console.log(`  Plugin: added to config`);
   }
+
+  printRecommendations(result.recommendations);
 }

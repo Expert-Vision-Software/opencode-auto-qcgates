@@ -27,12 +27,39 @@ export interface InstallResult {
   configPath: string;
   migrated: boolean;
   pluginAdded: boolean;
+  recommendations: string[];
 }
 
 export interface UninstallResult {
   scope: Scope;
   removed: string[];
   pluginRemoved: boolean;
+}
+
+export interface AureliaRecommendation {
+  detected: boolean;
+  message: string;
+}
+
+const AURELIA_PACKAGE_PATTERNS: Array<(name: string) => boolean> = [
+  name => name === "aurelia",
+  name => name === "aureliajs",
+  name => name.startsWith("@aurelia/"),
+  name => name === "aurelia-bootstrapper",
+  name => name === "aurelia-framework",
+];
+
+const DEP_GROUPS: string[] = [
+  "dependencies",
+  "devDependencies",
+  "peerDependencies",
+  "optionalDependencies",
+];
+
+export function printRecommendations(recommendations: string[]): void {
+  for (const recommendation of recommendations) {
+    console.log(`\n${recommendation}`);
+  }
 }
 
 export interface StatusResult {
@@ -281,6 +308,14 @@ export async function install(
     pluginAdded = await addPluginToConfig(configPath, packageName);
   }
 
+  const aureliaCheck = await detectAurelia(projectDir);
+  const optionalSkillRecs = await detectOptionalSkills(configBase);
+  const recommendations: string[] = [];
+  if (aureliaCheck.detected) {
+    recommendations.push(aureliaCheck.message);
+  }
+  recommendations.push(...optionalSkillRecs);
+
   return {
     scope,
     skillPaths,
@@ -288,6 +323,7 @@ export async function install(
     configPath,
     migrated,
     pluginAdded,
+    recommendations,
   };
 }
 
@@ -385,6 +421,75 @@ export async function status(projectDir: string = process.cwd()): Promise<Status
     local: localStatus,
     global: globalStatus,
   };
+}
+
+export async function detectAurelia(projectDir: string): Promise<AureliaRecommendation> {
+  const pkgJsonPath = join(projectDir, "package.json");
+  if (!(await exists(pkgJsonPath))) {
+    return { detected: false, message: "" };
+  }
+
+  let pkg: Record<string, unknown>;
+  try {
+    pkg = JSON.parse(await readFile(pkgJsonPath, "utf-8"));
+  } catch {
+    return { detected: false, message: "" };
+  }
+
+  const matched = new Set<string>();
+  for (const groupKey of DEP_GROUPS) {
+    const group = pkg[groupKey];
+    if (group && typeof group === "object") {
+      for (const name of Object.keys(group as Record<string, unknown>)) {
+        if (AURELIA_PACKAGE_PATTERNS.some(matches => matches(name))) {
+          matched.add(name);
+        }
+      }
+    }
+  }
+
+  if (matched.size === 0) {
+    return { detected: false, message: "" };
+  }
+
+  const evidence = [...matched].sort().join(", ");
+  const message = [
+    "Aurelia detected in this project (package.json: " + evidence + ").",
+    "The opencode-auto-qcgates skills are VCS-agnostic and backend/frontend-language agnostic, but",
+    "for richer AI-assisted Aurelia work, install the aurelia-expert skill pack (it is not a",
+    "dependency — these paths are surfaced by the installer only, never auto-applied):",
+    "  - OpenCode (recommended): add \"aurelia-expert\" to your opencode.json `plugin` array, e.g.",
+    `      { "$schema": "https://opencode.ai/config.json", "plugin": ["aurelia-expert"] }`,
+    "  - Cross-agent / non-OpenCode: `npx skills add expert-vision-software/aurelia-expert`",
+  ].join("\n");
+
+  return { detected: true, message };
+}
+
+export async function detectOptionalSkills(configBase: string): Promise<string[]> {
+  const recs: string[] = [];
+
+  // `grilling` — used by /test-baseline init when tiers can't be inferred
+  // (no manifest at the source-control root, or the inline tier grill fails to
+  // converge). Not shipped by this plugin; fetched on demand via the consumer
+  // running `npx -y skills use` (one-shot) or `npx -y skills add` (permanent).
+  const grillingPath = join(configBase, "skills", "grilling");
+  if (!(await exists(grillingPath))) {
+    recs.push(
+      [
+        "Optional skill not detected: `grilling`",
+        "  Purpose: interview loop for `/test-baseline init` when the consumer has no recognizable manifest or its tier set can't be inferred.",
+        "  Source:  github.com/mattpocock/skills (MIT). Not shipped by this plugin.",
+        "  One-shot (no permanent install — init captures the generated prompt):",
+        "    CI=true npx -y skills use mattpocock/skills --skill grilling",
+        "  Permanent install (default agent `universal` if your agent is unknown):",
+        "    npx -y skills add mattpocock/skills --skill grilling -a universal",
+        "  After a permanent install, `loadSkill({ name: \"grilling\" })` resolves directly from the agent's skills path.",
+      ].join("\n")
+    );
+  }
+
+  return recs;
 }
 
 export async function isLocalInstalled(projectDir: string): Promise<boolean> {

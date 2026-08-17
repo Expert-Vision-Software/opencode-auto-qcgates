@@ -5,3 +5,7 @@ bun.lock
 .env.*
 !.env.example
 .npmrc
+
+.opencode/skills/
+.opencode/commands/
+.opencode/*.local

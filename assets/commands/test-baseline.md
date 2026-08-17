@@ -1,20 +1,31 @@
 ---
-description: Test baselining workflow (init|eval|update)
+description: Test baselining workflow (init|eval|update). Routes to the explore subagent; defaults to eval.
 agent: explore
 subtask: true
 ---
 
-Load the test-baselining skill and execute the specified command:
+Load the test-baselining skill and execute the requested subcommand.
+
+```
 !`tool loadSkill({ name: "test-baselining" })`
+```
 
-Command: $ARGUMENTS (defaults to "eval" if not specified)
+Argument: `$ARGUMENTS` — defaults to `eval` if not specified.
 
-Available commands:
-- init:   Initialize a new baseline from current test results
-- eval:   Evaluate current tests against existing baseline (DEFAULT)
-- update: Update baseline if current results PASS and thresholds exceeded
+Available subcommands:
+
+| Subcommand | Purpose |
+|------------|---------|
+| `init` | Build the consumer's `testing-protocol.md` and `testing-baseline.xml` from the actual tiers, then capture the first baseline as `BL-001`. Grills the user for tiers first (code: toolchain per tier; non-code: repeatable verification procedures). |
+| `eval` | Compare current execution against the existing baseline using the protocol's thresholds and pass/fail criteria. **Default.** |
+| `update` | Update the baseline only when the current run is PASS **and** a threshold is exceeded. Increments the baseline marker (`BL-NNN` → `BL-NNN+1`). |
 
 Usage:
-  /test-baseline eval     # Default - evaluate against baseline
-  /test-baseline init     # Create new baseline
-  /test-baseline update   # Conditionally update baseline
+
+```
+/test-baseline eval     # default — evaluate against baseline
+/test-baseline init     # grill for tiers, generate protocol, capture baseline
+/test-baseline update   # conditionally refresh the baseline
+```
+
+The skill is agent-agnostic at the body level; the `agent: explore` / `subtask: true` frontmatter above is OpenCode-specific binding. Other dot-agents agents see the command body and route it however their loader requires.
