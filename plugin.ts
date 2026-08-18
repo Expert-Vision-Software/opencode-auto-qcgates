@@ -4,20 +4,20 @@ import { join } from "node:path";
 
 const SKILL_NAMES = ["test-baselining", "regression-checking", "grilling"] as const;
 
-function setExploreSkillPermissions(input: Config): void {
+function setTaskSkillPermissions(input: Config): void {
   input.agent ??= {};
-  input.agent.explore ??= {};
-  input.agent.explore.permission ??= {};
-  const perm = input.agent.explore.permission as Record<string, unknown>;
-  perm.skill ??= {};
-  const skillPerm = perm.skill as Record<string, string>;
-  skillPerm["test-baselining"] = "allow";
-  skillPerm["regression-checking"] = "allow";
-  // `grilling` is an optional chain from test-baselining init (see
-  // assets/skills/test-baselining/SKILL.md Step 1.5). The entry is harmless
-  // if grilling is not installed; OpenCode consults the allowlist only when
-  // the loadSkill tool is actually invoked.
-  skillPerm["grilling"] = "allow";
+  input.agent.task ??= {};
+
+  const taskAgent = input.agent.task as Record<string, unknown>;
+  taskAgent.permission ??= {};
+
+  const permission = taskAgent.permission as Record<string, unknown>;
+  permission.skill ??= {};
+  const skillPermissions = permission.skill as Record<string, string>;
+
+  for (const skillName of ["test-baselining", "regression-checking", "grilling"]) {
+    skillPermissions[skillName] = "allow";
+  }
 }
 
 const plugin: Plugin = async ({ directory }) => ({
@@ -33,7 +33,7 @@ const plugin: Plugin = async ({ directory }) => ({
       try {
         const installedVersion = (await Bun.file(marker).text()).trim();
         if (installedVersion === version) {
-          setExploreSkillPermissions(input);
+          setTaskSkillPermissions(input);
           return;
         }
       } catch {
@@ -49,7 +49,7 @@ const plugin: Plugin = async ({ directory }) => ({
         console.log(`  Commands: ${result.commandPaths.join(", ")}`);
       }
       printRecommendations(result.recommendations);
-      setExploreSkillPermissions(input);
+      setTaskSkillPermissions(input);
       return;
     }
 
@@ -64,7 +64,7 @@ const plugin: Plugin = async ({ directory }) => ({
           if (localConfig) {
             mergeConfigWithOverrides(input as Record<string, unknown>, localConfig);
           }
-          setExploreSkillPermissions(input);
+          setTaskSkillPermissions(input);
           return;
         }
       } catch {
@@ -88,7 +88,7 @@ const plugin: Plugin = async ({ directory }) => ({
       if (newLocalConfig) {
         mergeConfigWithOverrides(input as Record<string, unknown>, newLocalConfig);
       }
-      setExploreSkillPermissions(input);
+      setTaskSkillPermissions(input);
       return;
     }
 
@@ -112,7 +112,7 @@ const plugin: Plugin = async ({ directory }) => ({
         if (localConfig) {
           mergeConfigWithOverrides(input as Record<string, unknown>, localConfig);
         }
-        setExploreSkillPermissions(input);
+        setTaskSkillPermissions(input);
         return;
       }
     } catch {
@@ -136,7 +136,7 @@ const plugin: Plugin = async ({ directory }) => ({
     if (finalLocalConfig) {
       mergeConfigWithOverrides(input as Record<string, unknown>, finalLocalConfig);
     }
-    setExploreSkillPermissions(input);
+    setTaskSkillPermissions(input);
   },
 });
 

@@ -41,6 +41,25 @@ describe("TestBaseliningPlugin", () => {
     const commandContent = await readFile(commandPath, "utf-8");
     expect(commandContent).toContain("test-baseline");
   });
+
+  test("writes schema-compatible explore skill permissions", async () => {
+    // @ts-ignore - PluginInput requires full context, we only need directory
+    const pluginResult = await plugin({ directory: TEST_DIR });
+    const input = {} as Record<string, unknown>;
+    // @ts-ignore - config returns async function that takes Config argument
+    await (pluginResult.config as ((input: unknown) => Promise<void>) | undefined)?.(input);
+
+    const agent = (input as Record<string, unknown>).agent as Record<string, unknown> | undefined;
+    expect(agent).toBeDefined();
+    const explore = agent?.explore as Record<string, unknown> | undefined;
+    expect(explore).toBeDefined();
+    const permission = explore?.permission as Record<string, unknown> | undefined;
+    expect(permission).toBeDefined();
+    const skillPermissions = permission?.skill as Record<string, string> | undefined;
+    expect(skillPermissions?.["test-baselining"]).toBe("allow");
+    expect(skillPermissions?.["regression-checking"]).toBe("allow");
+    expect(skillPermissions?.["grilling"]).toBe("allow");
+  });
 });
 
 describe("detectAurelia", () => {

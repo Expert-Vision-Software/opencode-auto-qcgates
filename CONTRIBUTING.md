@@ -129,6 +129,6 @@ When a local installation exists alongside a global one, the local configuration
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
 | Skill not in `<available_skills>` list | Not installed yet | Run `bunx opencode-auto-qcgates install` |
-| Skill not accessible to explore subagent | Permission not granted | Run install again to refresh permissions |
+| Skill not accessible to task agent | Permission not granted | Run install again to refresh permissions |
 | Local install not overriding global | Version mismatch | Ensure local and global are same version |
 | `bunx opencode-auto-qcgates` not found | Bun missing or package not in PATH | Install Bun from `bun.sh`; try `npx opencode-auto-qcgates install` as fallback |

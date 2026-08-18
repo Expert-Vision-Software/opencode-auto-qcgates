@@ -37,7 +37,7 @@ A change belongs on the **harness** side when it shifts the install mechanic, pl
 These are the load-bearing conventions. Read `AGENTS.md` for the full list; these are the ones that bite if missed.
 
 - **Skill body stays agent-agnostic.** No OpenCode-only tools, no `loadSkill({...})` syntax, no agent-specific permission keys. OpenCode-specific bindings live in a tail `## OpenCode` section per skill.
-- **Slash-command frontmatter (`agent: explore`, `subtask: true`) is OpenCode-specific.** Other dot-agents agents ignore it. Don't put agent-routing logic in the command body.
+- **Slash-command frontmatter (`agent: task`, `subtask: true`) is OpenCode-specific.** Other dot-agents agents ignore it. Don't put agent-routing logic in the command body.
 - **Skill reference pattern** (inside a skill or command that wants to reach another skill): describe the loader as `the agent's skill loader`, not as a specific tool. Each agent's body resolves it natively.
 - **`init` grills the consumer.** Tier discovery is grilling, not assumption. Never hard-code "backend = dotnet, frontend = npm" — the consumer's `testing-protocol.md` is the truth.
 - **Non-code repos are first-class.** Document repos, configs, data — anything with a repeatable verification procedure. Tiers become document classes; tests become validators.

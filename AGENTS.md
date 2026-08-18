@@ -47,9 +47,9 @@ assets/commands/
 **Install model — dot-agents universal, OpenCode-extras on top:**
 
 - **Universal install** — `plugin.ts` → `src/installer.ts` copies skills, commands, and agents to a dot-agents layout (`SKILL.md` per skill folder). Other agents consume them directly.
-- **OpenCode accommodation** — The harness additionally registers the plugin in `opencode.json`, sets the `agent.explore.permission.skill` allowlist for both skills, and migrates a root `opencode.json` to `.opencode/opencode.json` when present. OpenCode's `loadSkill({ name })` tool resolves skills through the same layout.
+- **OpenCode accommodation** — The harness additionally registers the plugin in `opencode.json`, sets the `agent.task.permission.skill` allowlist for both skills, and migrates a root `opencode.json` to `.opencode/opencode.json` when present. OpenCode's `loadSkill({ name })` tool resolves skills through the same layout.
 
-Skill bodies stay agent-agnostic. OpenCode-specific bindings live in a tail section of each `SKILL.md` and in the command frontmatter (`agent: explore`, `subtask: true`).
+Skill bodies stay agent-agnostic. OpenCode-specific bindings live in a tail section of each `SKILL.md` and in the command frontmatter (`agent: task`, `subtask: true`).
 
 ## Consumer Project Files
 
@@ -66,7 +66,7 @@ After `/test-baseline init`, two files appear at the consumer project root:
 
 ## Adding Commands or Skills
 
-**New command:** Create `assets/commands/<name>.md` with frontmatter `agent: explore` and `subtask: true` (OpenCode-specific — ignored by other agents). The body typically loads the corresponding skill.
+- **New command:** Create `assets/commands/<name>.md` with frontmatter `agent: task` and `subtask: true` (OpenCode-specific — ignored by other agents). The body typically loads the corresponding skill.
 
 **New skill:** Create `assets/skills/<name>/SKILL.md` with required frontmatter (`name`, `description`). Use a `templates/` subdirectory for files that should be copied to consumer projects. Body must be agent-agnostic; put any OpenCode-specific bindings in a tail `## OpenCode` section.
 
@@ -81,7 +81,7 @@ After `/test-baseline init`, two files appear at the consumer project root:
 - Changelog is append-only and FIFO-pruned to 10 entries
 - Changelog auto-generates summaries based on which thresholds were exceeded — **build-artifact deltas are first-class in the summary, never buried under test deltas**
 - `regression-checking` delegates to `test-baselining` and reads `testing-protocol.md` for threshold interpretation
-- Commands route to the explore subagent by default (clean isolation; OpenCode-only — other agents use their own routing)
+- Commands route to the task agent by default (clean isolation; OpenCode-only — other agents use their own routing)
 - Skill bodies are agent-agnostic; OpenCode bindings live in a tail section per skill
 - **`refs/` is reference, not policy.** Files under `assets/skills/<name>/refs/` are bundled with the skill and copied to the consumer; the skill body consults them during guided flows (`init`, `Locating the Consumer Files`, `Caching Logic`) but they are explicitly *non-authoritative* — the consumer's `testing-protocol.md` is the truth once it is written. `source-controls.md` is always-relevant; `backends-ref.md` and `frontend-refs.md` are init-only.
 - **Skills are VCS-agnostic at the body level.** Git-specific wording is a stand-in; the lookup table lives in `refs/source-controls.md` and the agent consults it for the consumer's actual source control. Coverage: Git, Mercurial, Subversion, Pijul, Fossil, **Unity VCS** (Unity Version Control / Plastic SCM), Perforce, Bazaar, Darcs.

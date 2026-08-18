@@ -290,8 +290,8 @@ This skill is tier-agnostic. Implementation adapts to whatever tiers and tools t
 OpenCode-specific bindings for this skill:
 
 - **Slash command** — `/test-baseline init|eval|update` routes through the `explore` agent with `subtask: true`. The command body loads this skill via the `loadSkill` tool.
-- **Skill allowlist** — `plugin.ts` sets `agent.explore.permission.skill["test-baselining"] = "allow"` so the explore subagent can reach this skill without a prompt.
-- **Optional skill chain** — `init` may invoke `loadSkill({ name: "grilling" })` when no manifest is present (A) or the inline tier grill fails to converge (B). The chain is best-effort; a missing skill falls through to the inline Step 2 table. `plugin.ts` adds `grilling` to `agent.explore.permission.skill` alongside `test-baselining` and `regression-checking` — the entry is harmless if the skill isn't installed; OpenCode consults the allowlist only when the loadSkill tool is actually invoked.
+- **Skill allowlist** — `plugin.ts` sets `agent.task.permission.skill["test-baselining"] = "allow"` so the task agent can reach this skill without a prompt.
+- **Optional skill chain** — `init` may invoke `loadSkill({ name: "grilling" })` when no manifest is present (A) or the inline tier grill fails to converge (B). The chain is best-effort; a missing skill falls through to the inline Step 2 table. `plugin.ts` adds `grilling` to `agent.task.permission.skill` alongside `test-baselining` and `regression-checking` — the entry is harmless if the skill isn't installed; OpenCode consults the allowlist only when the loadSkill tool is actually invoked.
 - **Install layout** — OpenCode's plugin harness copies this skill to `.opencode/skills/test-baselining/` (project) or `~/.config/opencode/skills/test-baselining/` (global). A `.version` marker next to `SKILL.md` drives idempotent reinstalls.
 - **Asset reuse** — Both `test-baselining` and `regression-checking` are model-invoked skills (they each carry a `description`) so any subagent that loads them can chain the other. `regression-checking` calls `loadSkill({ name: "test-baselining" })` to reuse this skill's execution workflow.
 

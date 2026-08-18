@@ -180,7 +180,7 @@ Use visual indicators:
 OpenCode-specific bindings for this skill:
 
 - **Slash command** — `/regression-check` (or `/regression-check status` for a quick check without a full eval) routes through the `explore` agent with `subtask: true`. The command body loads this skill via the `loadSkill` tool.
-- **Skill allowlist** — `plugin.ts` sets `agent.explore.permission.skill["regression-checking"] = "allow"` so the explore subagent can reach this skill without a prompt.
+- **Skill allowlist** — `plugin.ts` sets `agent.task.permission.skill["regression-checking"] = "allow"` so the task agent can reach this skill without a prompt.
 - **Skill chain** — OpenCode's `loadSkill({ name: "test-baselining" })` call inside this skill reuses the same install location and permission allowlist, so the chain works without extra config.
 - **Install layout** — OpenCode's plugin harness copies this skill to `.opencode/skills/regression-checking/` (project) or `~/.config/opencode/skills/regression-checking/` (global). A `.version` marker drives idempotent reinstalls.
 
