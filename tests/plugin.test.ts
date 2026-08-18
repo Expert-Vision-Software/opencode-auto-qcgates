@@ -42,7 +42,7 @@ describe("TestBaseliningPlugin", () => {
     expect(commandContent).toContain("test-baseline");
   });
 
-  test("writes schema-compatible explore skill permissions", async () => {
+  test("writes schema-compatible task skill permissions", async () => {
     // @ts-ignore - PluginInput requires full context, we only need directory
     const pluginResult = await plugin({ directory: TEST_DIR });
     const input = {} as Record<string, unknown>;
@@ -51,9 +51,9 @@ describe("TestBaseliningPlugin", () => {
 
     const agent = (input as Record<string, unknown>).agent as Record<string, unknown> | undefined;
     expect(agent).toBeDefined();
-    const explore = agent?.explore as Record<string, unknown> | undefined;
-    expect(explore).toBeDefined();
-    const permission = explore?.permission as Record<string, unknown> | undefined;
+    const task = agent?.task as Record<string, unknown> | undefined;
+    expect(task).toBeDefined();
+    const permission = task?.permission as Record<string, unknown> | undefined;
     expect(permission).toBeDefined();
     const skillPermissions = permission?.skill as Record<string, string> | undefined;
     expect(skillPermissions?.["test-baselining"]).toBe("allow");
