@@ -1,7 +1,7 @@
 ---
 description: Test baselining workflow (init|eval|update). Routes to the task agent; defaults to eval.
 agent: task
-subtask: true
+subtask: false
 ---
 
 Load the test-baselining skill and execute the requested subcommand.

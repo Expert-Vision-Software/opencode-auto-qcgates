@@ -43,6 +43,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Indent drift in `templates/testing-baseline.xml` (`<Build>` / `<BuildArtifacts>` opening tags) and `templates/testing-protocol.md` (new build-artifact bullets) corrected to match the file's existing pattern.
 - `.opencode/skills/` and `.opencode/commands/` are now gitignored. They are a derived install cache, not source-of-truth — the canonical files live at `assets/skills/` and `assets/commands/`. The only tracked file under `.opencode/` remains `opencode.json` (the dev's OpenCode config).
 
+## [1.3.1] - 2026-09-06
+
+### Changed
+- `/test-baseline` command frontmatter sets `subtask: false` — the command now runs in the main conversation instead of spawning a task subagent, so grilling-style interaction with the user works during `init`.
+
+### Fixed
+- `test-baselining` SKILL.md grilling-flow probe path placeholder renamed `<configBase>` → `<base>` to match the terminology used elsewhere in the skill.
+- Dev `.opencode/opencode.json` plugin reference switched from a machine-specific absolute `file:///` path to the package name `opencode-architect`, making the dev config portable.
+
 ## [1.2.0] - 2026-08-16
 
 ### Added

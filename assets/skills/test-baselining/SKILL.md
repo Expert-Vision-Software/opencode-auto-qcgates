@@ -61,7 +61,7 @@ Build the consumer's first `testing-protocol.md` and `testing-baseline.xml` from
 
 If either condition holds, **delegate the interview to the `grilling` skill**:
 
-1. **Prefer permanent install.** Probe `<configBase>/skills/grilling/` (the active agent's standard skills root). If present, call `tool loadSkill({ name: "grilling" })` and follow the loaded skill's body.
+1. **Prefer permanent install.** Probe `<base>/skills/grilling/` (the active agent's standard skills root). If present, call `tool loadSkill({ name: "grilling" })` and follow the loaded skill's body.
 2. **Otherwise one-shot.** If not present, shell out: `CI=true npx -y skills use mattpocock/skills --skill grilling`. Capture stdout (the generated prompt), treat it as the interview protocol, and follow it inline.
 3. **Otherwise fall through.** If `npx` fails (no network, no node, user denied), the agent drops back to the inline Step 2 grill table and asks the user directly. The chain is best-effort, never load-bearing.
 
