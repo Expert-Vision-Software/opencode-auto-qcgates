@@ -1,5 +1,11 @@
 import { describe, test, expect } from "bun:test";
-import { validatePackageManifest, type PackageManifest } from "../src/optional-deps.ts";
+import {
+  validatePackageManifest,
+  mergeOptionalDependencies,
+  type PackageManifest,
+  type PackageOptionalDep,
+  type InstallOptionalDep,
+} from "../src/optional-deps.ts";
 
 const VALID_MANIFEST: PackageManifest = {
   manifestVersion: 1,
@@ -164,5 +170,128 @@ describe("validatePackageManifest", () => {
     if (!result.ok) {
       expect(result.errors.join("\n")).toContain("optionalDependencies[1]");
     }
+  });
+});
+
+describe("mergeOptionalDependencies", () => {
+  const GRILLING: PackageOptionalDep = {
+    id: "grilling",
+    kind: "skill",
+    description: "Interview loop for `/test-baseline init`.",
+    source: { type: "external-skill", repo: "mattpocock/skills", skill: "grilling" },
+  };
+
+  function declared(...deps: PackageOptionalDep[]): PackageOptionalDep[] {
+    return deps;
+  }
+
+  function installed(...deps: InstallOptionalDep[]): InstallOptionalDep[] {
+    return deps;
+  }
+
+  function withState(dep: PackageOptionalDep, state: InstallOptionalDep["state"]): InstallOptionalDep {
+    return { ...dep, state };
+  }
+
+  test("a fresh install marks every declared dependency pending", () => {
+    const result = mergeOptionalDependencies(undefined, declared(GRILLING));
+    expect(result.dependencies).toEqual([withState(GRILLING, "pending")]);
+    expect(result.changed).toBe(true);
+  });
+
+  test("an empty existing section is treated the same as a missing one", () => {
+    const result = mergeOptionalDependencies([], declared(GRILLING));
+    expect(result.dependencies).toEqual([withState(GRILLING, "pending")]);
+    expect(result.changed).toBe(true);
+  });
+
+  test("accepted state survives a merge with an unchanged declaration", () => {
+    const result = mergeOptionalDependencies(
+      installed(withState(GRILLING, "accepted")),
+      declared(GRILLING)
+    );
+    expect(result.dependencies).toEqual([withState(GRILLING, "accepted")]);
+    expect(result.changed).toBe(false);
+  });
+
+  test("declined state is sticky for an unchanged declaration", () => {
+    const result = mergeOptionalDependencies(
+      installed(withState(GRILLING, "declined")),
+      declared(GRILLING)
+    );
+    expect(result.dependencies).toEqual([withState(GRILLING, "declined")]);
+    expect(result.changed).toBe(false);
+  });
+
+  test("a changed source flips accepted back to pending", () => {
+    const moved: PackageOptionalDep = {
+      ...GRILLING,
+      source: { type: "external-skill", repo: "someone-else/skills", skill: "grilling" },
+    };
+    const result = mergeOptionalDependencies(installed(withState(GRILLING, "accepted")), declared(moved));
+    expect(result.dependencies).toEqual([withState(moved, "pending")]);
+    expect(result.changed).toBe(true);
+  });
+
+  test("a changed kind flips declined back to pending", () => {
+    const rekindled: PackageOptionalDep = { ...GRILLING, kind: "plugin" };
+    const result = mergeOptionalDependencies(installed(withState(GRILLING, "declined")), declared(rekindled));
+    expect(result.dependencies).toEqual([withState(rekindled, "pending")]);
+    expect(result.changed).toBe(true);
+  });
+
+  test("a description-only change refreshes the description but preserves state", () => {
+    const reworded: PackageOptionalDep = { ...GRILLING, description: "A better description." };
+    const result = mergeOptionalDependencies(
+      installed(withState(GRILLING, "accepted")),
+      declared(reworded)
+    );
+    expect(result.dependencies).toEqual([withState(reworded, "accepted")]);
+    expect(result.changed).toBe(true);
+  });
+
+  test("entries absent from the package declaration are kept (union)", () => {
+    const retired: PackageOptionalDep = {
+      id: "retired-dep",
+      kind: "skill",
+      description: "No longer declared.",
+      source: { type: "bundled", path: "assets/skills/retired-dep" },
+    };
+    const result = mergeOptionalDependencies(
+      installed(withState(retired, "declined")),
+      declared(GRILLING)
+    );
+    expect(result.dependencies).toEqual([
+      withState(GRILLING, "pending"),
+      withState(retired, "declined"),
+    ]);
+    expect(result.changed).toBe(true);
+  });
+
+  test("package order wins; undeclared entries follow", () => {
+    const second: PackageOptionalDep = {
+      id: "second",
+      kind: "plugin",
+      description: "A plugin dep.",
+      source: { type: "npm", package: "second-plugin" },
+    };
+    const kept: PackageOptionalDep = {
+      id: "kept",
+      kind: "agent",
+      description: "An agent dep.",
+      source: { type: "bundled", path: "assets/agents/kept" },
+    };
+    const result = mergeOptionalDependencies(
+      installed(withState(kept, "accepted"), withState(second, "accepted")),
+      declared(GRILLING, second)
+    );
+    expect(result.dependencies.map(dep => dep.id)).toEqual(["grilling", "second", "kept"]);
+  });
+
+  test("merging is idempotent: re-merging the output changes nothing", () => {
+    const first = mergeOptionalDependencies(undefined, declared(GRILLING));
+    const second = mergeOptionalDependencies(first.dependencies, declared(GRILLING));
+    expect(second.dependencies).toEqual(first.dependencies);
+    expect(second.changed).toBe(false);
   });
 });

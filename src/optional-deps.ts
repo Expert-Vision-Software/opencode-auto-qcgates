@@ -156,3 +156,43 @@ export function validatePackageManifest(value: unknown): PackageManifestValidati
     manifest: { manifestVersion: 1, optionalDependencies: deps as PackageOptionalDep[] },
   };
 }
+
+function sameDeclaration(a: PackageOptionalDep, b: PackageOptionalDep): boolean {
+  return a.kind === b.kind && JSON.stringify(a.source) === JSON.stringify(b.source);
+}
+
+export interface OptionalDepMergeResult {
+  dependencies: InstallOptionalDep[];
+  changed: boolean;
+}
+
+export function mergeOptionalDependencies(
+  existing: InstallOptionalDep[] | undefined,
+  declared: PackageOptionalDep[]
+): OptionalDepMergeResult {
+  const prior = existing ?? [];
+  const priorById = new Map(prior.map(entry => [entry.id, entry]));
+  const merged: InstallOptionalDep[] = [];
+
+  for (const dep of declared) {
+    const priorEntry = priorById.get(dep.id);
+    if (priorEntry === undefined) {
+      merged.push({ ...dep, state: "pending" });
+      continue;
+    }
+    const state: OptionalDepState = sameDeclaration(dep, priorEntry) ? priorEntry.state : "pending";
+    merged.push({ ...dep, state });
+  }
+
+  const declaredIds = new Set(declared.map(dep => dep.id));
+  for (const entry of prior) {
+    if (!declaredIds.has(entry.id)) {
+      merged.push(entry);
+    }
+  }
+
+  return {
+    dependencies: merged,
+    changed: JSON.stringify(merged) !== JSON.stringify(prior),
+  };
+}
