@@ -66,23 +66,31 @@ async function showToastAdvisory(client: PluginClient, message: string): Promise
   }
 }
 
+async function emitAdvisoryOnce(state: AdvisoryState, client: PluginClient, message: string): Promise<void> {
+  if (state.emitted) {
+    return;
+  }
+  state.emitted = true;
+  await logWarn(client, message);
+  await showToastAdvisory(client, message);
+}
+
 async function maybeEmitInstallAdvisory(state: AdvisoryState, client: PluginClient, directory: string): Promise<void> {
   if (state.emitted || (await RegistrationDetector.hasAnyInstallation(directory))) {
     return;
   }
-  state.emitted = true;
-  await logWarn(client, INSTALL_ADVISORY_MESSAGE);
-  await showToastAdvisory(client, INSTALL_ADVISORY_MESSAGE);
+  await emitAdvisoryOnce(state, client, INSTALL_ADVISORY_MESSAGE);
 }
 
-function pendingDepsAdvisoryMessage(count: number, ids: string[]): string {
+function pendingDepsAdvisoryMessage(ids: string[]): string {
+  const count = ids.length;
   const noun = count === 1 ? "optional dependency" : "optional dependencies";
   const verb = count === 1 ? "is" : "are";
   const pronoun = count === 1 ? "it" : "them";
   return (
     `${PLUGIN_SERVICE_NAME}: ${count} ${noun} (${ids.join(", ")}) ${verb} available but pending your decision. ` +
     `Run "bunx ${PLUGIN_SERVICE_NAME}" (no arguments) to review ${pronoun} in the interactive menu. ` +
-    `Nothing was installed or changed.`
+    `Nothing is installed automatically.`
   );
 }
 
@@ -94,14 +102,11 @@ async function maybeEmitPendingDepsAdvisory(
   if (state.emitted) {
     return;
   }
-  const { count, ids } = await findPendingOptionalDeps(directory);
-  if (count === 0) {
+  const ids = await findPendingOptionalDeps(directory);
+  if (ids.length === 0) {
     return;
   }
-  state.emitted = true;
-  const message = pendingDepsAdvisoryMessage(count, ids);
-  await logWarn(client, message);
-  await showToastAdvisory(client, message);
+  await emitAdvisoryOnce(state, client, pendingDepsAdvisoryMessage(ids));
 }
 
 async function reportLoadSkippedFiles(client: PluginClient, result: InstallResult): Promise<void> {

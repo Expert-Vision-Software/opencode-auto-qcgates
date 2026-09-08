@@ -1,7 +1,7 @@
 import { select } from "@inquirer/prompts";
 import { join } from "node:path";
 import { getGlobalConfigPath, getLocalConfigPath, type Scope } from "../installer.ts";
-import { InstallManifest } from "../manifest.ts";
+import { InstallManifest, installManifestPath } from "../manifest.ts";
 import { applyOptionalDepDecisions, type CommandExecutor } from "../optional-deps-actions.ts";
 import {
   isInteractiveStdio,
@@ -47,7 +47,7 @@ export async function manageDepsCommand(options: ManageDepsOptions): Promise<voi
 
   const projectDir = options.projectDir ?? process.cwd();
   const configBase = scope === "global" ? getGlobalConfigPath() : getLocalConfigPath(projectDir);
-  const manifestPath = join(configBase, `${packageName}.manifest.json`);
+  const manifestPath = installManifestPath(configBase, packageName);
 
   const manifest = await InstallManifest.read(manifestPath);
   if (!manifest.hasContents()) {

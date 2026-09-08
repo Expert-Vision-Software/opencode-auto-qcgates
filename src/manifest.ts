@@ -8,6 +8,10 @@ export interface ManifestFileEntry {
   hash: string;
 }
 
+export function installManifestPath(configBase: string, packageName: string): string {
+  return join(configBase, `${packageName}.manifest.json`);
+}
+
 export interface ManifestContents {
   version: string;
   files: ManifestFileEntry[];

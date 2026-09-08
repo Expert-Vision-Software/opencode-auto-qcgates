@@ -2,7 +2,7 @@ import { copyFile, exists, mkdir, readdir, readFile, rm, writeFile } from "node:
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { PluginNameNormalizer } from "./plugin-name.ts";
-import { InstallManifest, type ManifestFileEntry } from "./manifest.ts";
+import { InstallManifest, installManifestPath, type ManifestFileEntry } from "./manifest.ts";
 import {
   loadPackageManifest,
   mergeOptionalDependencies,
@@ -450,7 +450,7 @@ export async function install(
 
   const configBase = scope === "global" ? getGlobalConfigPath() : getLocalConfigPath(projectDir);
   const configPath = join(configBase, "opencode.json");
-  const manifestPath = join(configBase, `${packageName}.manifest.json`);
+  const manifestPath = installManifestPath(configBase, packageName);
 
   let migrated = false;
 
@@ -585,7 +585,7 @@ export async function uninstall(
     }
   }
 
-  const manifestPath = join(configBase, `${packageName}.manifest.json`);
+  const manifestPath = installManifestPath(configBase, packageName);
   if (await exists(manifestPath)) {
     await rm(manifestPath);
     removed.push(manifestPath);
@@ -612,7 +612,7 @@ export async function isScopeInstalled(configBase: string, packageName: string):
 }
 
 async function readScopeStatus(configBase: string, packageName: string): Promise<ScopeStatus | null> {
-  const manifest = await InstallManifest.read(join(configBase, `${packageName}.manifest.json`));
+  const manifest = await InstallManifest.read(installManifestPath(configBase, packageName));
   const legacySkillDir = join(configBase, "skills", "test-baselining");
   if (!manifest.hasContents() && !(await exists(legacySkillDir))) {
     return null;

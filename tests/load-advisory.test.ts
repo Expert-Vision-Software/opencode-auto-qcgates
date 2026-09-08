@@ -50,10 +50,9 @@ describe("findPendingOptionalDeps", () => {
       await resetGlobalConfig();
       const fixtureDir = await makeFixture("pending-none");
 
-      const result = await findPendingOptionalDeps(fixtureDir);
+      const ids = await findPendingOptionalDeps(fixtureDir);
 
-      expect(result.count).toBe(0);
-      expect(result.ids).toEqual([]);
+      expect(ids).toEqual([]);
     });
   });
 
@@ -63,10 +62,9 @@ describe("findPendingOptionalDeps", () => {
       const fixtureDir = await makeFixture("pending-local");
       await writeInstallManifest(join(fixtureDir, ".opencode"), [dep("grilling", "pending")]);
 
-      const result = await findPendingOptionalDeps(fixtureDir);
+      const ids = await findPendingOptionalDeps(fixtureDir);
 
-      expect(result.count).toBe(1);
-      expect(result.ids).toEqual(["grilling"]);
+      expect(ids).toEqual(["grilling"]);
     });
   });
 
@@ -76,10 +74,9 @@ describe("findPendingOptionalDeps", () => {
       const fixtureDir = await makeFixture("pending-global");
       await writeInstallManifest(SANDBOX_GLOBAL_BASE, [dep("grilling", "pending")]);
 
-      const result = await findPendingOptionalDeps(fixtureDir);
+      const ids = await findPendingOptionalDeps(fixtureDir);
 
-      expect(result.count).toBe(1);
-      expect(result.ids).toEqual(["grilling"]);
+      expect(ids).toEqual(["grilling"]);
     });
   });
 
@@ -90,10 +87,9 @@ describe("findPendingOptionalDeps", () => {
       await writeInstallManifest(SANDBOX_GLOBAL_BASE, [dep("grilling", "pending")]);
       await writeInstallManifest(join(fixtureDir, ".opencode"), [dep("grilling", "pending")]);
 
-      const result = await findPendingOptionalDeps(fixtureDir);
+      const ids = await findPendingOptionalDeps(fixtureDir);
 
-      expect(result.count).toBe(1);
-      expect(result.ids).toEqual(["grilling"]);
+      expect(ids).toEqual(["grilling"]);
     });
   });
 
@@ -106,10 +102,9 @@ describe("findPendingOptionalDeps", () => {
         dep("grilling", "declined"),
       ]);
 
-      const result = await findPendingOptionalDeps(fixtureDir);
+      const ids = await findPendingOptionalDeps(fixtureDir);
 
-      expect(result.count).toBe(0);
-      expect(result.ids).toEqual([]);
+      expect(ids).toEqual([]);
     });
   });
 
@@ -122,10 +117,9 @@ describe("findPendingOptionalDeps", () => {
         dep("grilling", "accepted"),
       ]);
 
-      const result = await findPendingOptionalDeps(fixtureDir);
+      const ids = await findPendingOptionalDeps(fixtureDir);
 
-      expect(result.count).toBe(0);
-      expect(result.ids).toEqual([]);
+      expect(ids).toEqual([]);
     });
   });
 
@@ -140,10 +134,9 @@ describe("findPendingOptionalDeps", () => {
         JSON.stringify({ version: "0.0.0-test", files: [] }, null, 2)
       );
 
-      const result = await findPendingOptionalDeps(fixtureDir);
+      const ids = await findPendingOptionalDeps(fixtureDir);
 
-      expect(result.count).toBe(0);
-      expect(result.ids).toEqual([]);
+      expect(ids).toEqual([]);
     });
   });
 
@@ -153,9 +146,9 @@ describe("findPendingOptionalDeps", () => {
       const fixtureDir = await makeFixture("pending-read-only");
       await writeInstallManifest(join(fixtureDir, ".opencode"), [dep("grilling", "pending")]);
 
-      const result = await findPendingOptionalDeps(fixtureDir);
+      const ids = await findPendingOptionalDeps(fixtureDir);
 
-      expect(result.count).toBe(1);
+      expect(ids).toEqual(["grilling"]);
       expect(await exists(join(fixtureDir, ".opencode", `${PACKAGE_NAME}.manifest.json`))).toBe(true);
       expect(await exists(join(SANDBOX_GLOBAL_BASE, "opencode.json"))).toBe(false);
       expect(await exists(join(fixtureDir, "opencode.json"))).toBe(false);

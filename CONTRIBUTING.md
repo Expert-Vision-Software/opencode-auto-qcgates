@@ -65,6 +65,8 @@ opencode-auto-qcgates/
 │   │   ├── status.ts
 │   │   └── manage-deps.ts    # Optional-deps review (accept/decline, revisit declined)
 │   ├── installer.ts          # install/uninstall/status with ScopeResolver
+│   ├── load-advisory.ts      # Read-only pending optional-deps lookup for the load-path toast
+│   ├── manifest.ts           # Install manifest (version, file hashes, optional-deps states)
 │   ├── optional-deps.ts      # Optional-deps schema, validation, manifest merge
 │   ├── optional-deps-actions.ts # Per-kind installer actions + consent decisions recorder
 │   └── prompts.ts           # Interactive prompts and TTY detection
