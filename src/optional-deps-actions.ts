@@ -2,7 +2,7 @@ import { copyFile, exists, mkdir, readdir, readFile, writeFile } from "node:fs/p
 import { dirname, join, relative } from "node:path";
 import { PluginNameNormalizer } from "./plugin-name.ts";
 import { InstallManifest, type ManifestFileEntry } from "./manifest.ts";
-import type { PackageOptionalDep } from "./optional-deps.ts";
+import type { InstallOptionalDep, PackageOptionalDep } from "./optional-deps.ts";
 import type { Scope } from "./installer.ts";
 
 export type CommandExecutor = (command: string, args: string[]) => Promise<number>;
@@ -216,3 +216,79 @@ export async function applyOptionalDep(
   }
   return failResult(`no installer action for kind "${dep.kind}" with source type "${dep.source.type}"`);
 }
+
+export interface DepRunResult {
+  applied: Array<{ id: string; message: string }>;
+  declined: string[];
+  failed: Array<{ id: string; reason: string }>;
+  changed: boolean;
+}
+
+function sameDeps(a: InstallOptionalDep[], b: InstallOptionalDep[]): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+  return a.every((entry, index) =>
+    entry.id === b[index].id &&
+    entry.kind === b[index].kind &&
+    entry.description === b[index].description &&
+    entry.state === b[index].state &&
+    canonicalJson(entry.source) === canonicalJson(b[index].source)
+  );
+}
+
+export async function applyOptionalDepDecisions(
+  ctx: OptionalDepsContext,
+  deps: InstallOptionalDep[],
+  acceptedIds: Iterable<string>,
+  exec: CommandExecutor = defaultCommandExecutor
+): Promise<DepRunResult> {
+  const acceptedSet = new Set(acceptedIds);
+  const nextDeps = deps.map(dep => ({ ...dep }));
+  const extraFiles: ManifestFileEntry[] = [];
+  const applied: Array<{ id: string; message: string }> = [];
+  const declined: string[] = [];
+  const failed: Array<{ id: string; reason: string }> = [];
+
+  for (const [index, dep] of nextDeps.entries()) {
+    if (acceptedSet.has(dep.id)) {
+      const result = await applyOptionalDep(dep, ctx, exec);
+      if (result.ok) {
+        nextDeps[index] = { ...dep, state: "accepted" };
+        extraFiles.push(...result.files);
+        applied.push({ id: dep.id, message: result.message });
+      } else {
+        failed.push({ id: dep.id, reason: result.message });
+      }
+      continue;
+    }
+    if (dep.state === "accepted") {
+      continue;
+    }
+    if (dep.state !== "declined") {
+      nextDeps[index] = { ...dep, state: "declined" };
+      declined.push(dep.id);
+    }
+  }
+
+  const manifest = await InstallManifest.read(ctx.manifestPath);
+  if (!manifest.hasContents() || manifest.version === null) {
+    throw new Error(`Install manifest not found at ${ctx.manifestPath}; run install first.`);
+  }
+
+  let files = manifest.files;
+  if (extraFiles.length > 0) {
+    const byPath = new Map(files.map(entry => [entry.path, entry]));
+    for (const entry of extraFiles) {
+      byPath.set(entry.path, entry);
+    }
+    files = [...byPath.values()];
+  }
+
+  const changed = !sameDeps(nextDeps, deps) || extraFiles.length > 0;
+  if (changed) {
+    await InstallManifest.write(ctx.manifestPath, manifest.version, files, nextDeps);
+  }
+
+  return { applied, declined, failed, changed };
+};
