@@ -184,6 +184,12 @@ export function validatePackageManifest(value: unknown): PackageManifestValidati
   };
 }
 
+export function isValidOptionalDepEntry(value: unknown): value is PackageOptionalDep {
+  const errors: string[] = [];
+  validateOptionalDep(value, "optionalDependencies[?]", errors);
+  return errors.length === 0;
+}
+
 function sameDeclaration(a: PackageOptionalDep, b: PackageOptionalDep): boolean {
   return a.kind === b.kind && JSON.stringify(a.source) === JSON.stringify(b.source);
 }

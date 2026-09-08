@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { isValidOptionalDepEntry, type InstallOptionalDep } from "./optional-deps.ts";
 
 export interface ManifestFileEntry {
   path: string;
@@ -10,6 +11,7 @@ export interface ManifestFileEntry {
 export interface ManifestContents {
   version: string;
   files: ManifestFileEntry[];
+  optionalDependencies?: InstallOptionalDep[];
 }
 
 export type ManifestFileDisposition = "write" | "keep" | "skip";
@@ -33,8 +35,16 @@ export class InstallManifest {
     }
   }
 
-  static async write(manifestPath: string, version: string, files: ManifestFileEntry[]): Promise<void> {
+  static async write(
+    manifestPath: string,
+    version: string,
+    files: ManifestFileEntry[],
+    optionalDependencies?: InstallOptionalDep[]
+  ): Promise<void> {
     const contents: ManifestContents = { version, files };
+    if (optionalDependencies !== undefined) {
+      contents.optionalDependencies = optionalDependencies;
+    }
     await writeFile(manifestPath, JSON.stringify(contents, null, 2) + "\n");
   }
 
@@ -48,6 +58,14 @@ export class InstallManifest {
 
   get version(): string | null {
     return this.contents?.version ?? null;
+  }
+
+  get files(): ManifestFileEntry[] {
+    return this.contents?.files ?? [];
+  }
+
+  get optionalDependencies(): InstallOptionalDep[] {
+    return this.contents?.optionalDependencies ?? [];
   }
 
   hasContents(): boolean {
@@ -101,7 +119,18 @@ export class InstallManifest {
     if (!Array.isArray(candidate["files"])) {
       return false;
     }
-    return candidate["files"].every(entry => InstallManifest.isHashEntry(entry));
+    if (!candidate["files"].every(entry => InstallManifest.isHashEntry(entry))) {
+      return false;
+    }
+    if (candidate["optionalDependencies"] !== undefined) {
+      if (!Array.isArray(candidate["optionalDependencies"])) {
+        return false;
+      }
+      if (!candidate["optionalDependencies"].every(entry => InstallManifest.isOptionalDepEntry(entry))) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private static isHashEntry(value: unknown): value is ManifestFileEntry {
@@ -110,5 +139,13 @@ export class InstallManifest {
     }
     const candidate = value as Record<string, unknown>;
     return typeof candidate["path"] === "string" && typeof candidate["hash"] === "string";
+  }
+
+  private static isOptionalDepEntry(value: unknown): value is InstallOptionalDep {
+    if (!isValidOptionalDepEntry(value)) {
+      return false;
+    }
+    const state = (value as unknown as Record<string, unknown>)["state"];
+    return state === "pending" || state === "accepted" || state === "declined";
   }
 }

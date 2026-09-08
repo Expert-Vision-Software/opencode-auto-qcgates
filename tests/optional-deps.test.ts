@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { join } from "node:path";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, readFile, writeFile } from "node:fs/promises";
+import { install } from "../src/installer.ts";
 import {
   validatePackageManifest,
   mergeOptionalDependencies,
@@ -359,5 +360,106 @@ describe("loadPackageManifest", () => {
     if (!result.ok) {
       expect(result.errors.join("\n")).toContain("manifestVersion");
     }
+  });
+});
+
+describe("install optionalDependencies integration", () => {
+  const TEST_DIR = join(import.meta.dirname, ".test-install-optdeps");
+  const PACKAGE_NAME = "opencode-auto-qcgates";
+  const INSTALL_OPTIONS = { addPluginConfig: false, migrateRootConfig: false, force: false } as const;
+
+  beforeAll(async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+    await mkdir(TEST_DIR, { recursive: true });
+  });
+
+  afterAll(async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+  });
+
+  async function makeFixture(name: string): Promise<string> {
+    const fixtureDir = join(TEST_DIR, name);
+    await rm(fixtureDir, { recursive: true, force: true });
+    await mkdir(fixtureDir, { recursive: true });
+    return fixtureDir;
+  }
+
+  async function readSection(manifestPath: string): Promise<InstallOptionalDep[]> {
+    const manifest = JSON.parse(await readFile(manifestPath, "utf-8")) as {
+      optionalDependencies?: InstallOptionalDep[];
+    };
+    return manifest.optionalDependencies ?? [];
+  }
+
+  async function rewriteManifest(manifestPath: string, mutate: (manifest: Record<string, unknown>) => void): Promise<void> {
+    const manifest = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
+    mutate(manifest);
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+  }
+
+  test("fresh install records the grilling declaration as pending", async () => {
+    const fixtureDir = await makeFixture("fresh");
+    const result = await install("local", fixtureDir, INSTALL_OPTIONS);
+
+    const deps = await readSection(result.manifestPath);
+    expect(deps).toHaveLength(1);
+    expect(deps[0].id).toBe("grilling");
+    expect(deps[0].kind).toBe("skill");
+    expect(deps[0].state).toBe("pending");
+    expect(deps[0].source).toEqual({
+      type: "external-skill",
+      repo: "mattpocock/skills",
+      skill: "grilling",
+    });
+  });
+
+  test("accepted state survives a reinstall of an unchanged package", async () => {
+    const fixtureDir = await makeFixture("sticky-accepted");
+    const first = await install("local", fixtureDir, INSTALL_OPTIONS);
+    await rewriteManifest(first.manifestPath, manifest => {
+      const deps = manifest["optionalDependencies"] as InstallOptionalDep[];
+      deps[0]["state"] = "accepted";
+    });
+
+    const second = await install("local", fixtureDir, INSTALL_OPTIONS);
+
+    expect(second.action).toBe("noop");
+    const deps = await readSection(first.manifestPath);
+    expect(deps[0].state).toBe("accepted");
+  });
+
+  test("a changed package declaration flips a declined state back to pending", async () => {
+    const fixtureDir = await makeFixture("changed-decl");
+    const first = await install("local", fixtureDir, INSTALL_OPTIONS);
+    await rewriteManifest(first.manifestPath, manifest => {
+      const deps = manifest["optionalDependencies"] as InstallOptionalDep[];
+      deps[0]["source"] = { type: "external-skill", repo: "old-owner/skills", skill: "grilling" };
+      deps[0]["state"] = "declined";
+    });
+
+    await install("local", fixtureDir, INSTALL_OPTIONS);
+
+    const deps = await readSection(first.manifestPath);
+    expect(deps[0].state).toBe("pending");
+    expect(deps[0].source).toEqual({
+      type: "external-skill",
+      repo: "mattpocock/skills",
+      skill: "grilling",
+    });
+  });
+
+  test("a manifest predating the section gains it without rewriting any asset file", async () => {
+    const fixtureDir = await makeFixture("legacy-manifest");
+    const first = await install("local", fixtureDir, INSTALL_OPTIONS);
+    await rewriteManifest(first.manifestPath, manifest => {
+      delete manifest["optionalDependencies"];
+    });
+
+    const second = await install("local", fixtureDir, INSTALL_OPTIONS);
+
+    expect(second.action).toBe("noop");
+    const deps = await readSection(first.manifestPath);
+    expect(deps.map(dep => dep.id)).toEqual(["grilling"]);
+    expect(deps[0].state).toBe("pending");
   });
 });
