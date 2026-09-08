@@ -1,11 +1,18 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { join } from "node:path";
-import { exists, mkdir, rm, writeFile } from "node:fs/promises";
+import { exists, mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import plugin from "../plugin.ts";
-import { detectAurelia, detectOptionalSkills } from "../src/installer.ts";
+import { detectAurelia, detectOptionalSkills, install } from "../src/installer.ts";
 import { snapshotDirectory } from "./snapshot.ts";
+import {
+  SANDBOX_GLOBAL_BASE,
+  resetGlobalConfig,
+  withGlobalSandbox,
+  writeGlobalPluginConfig,
+} from "./global-sandbox.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".test-temp");
+const PACKAGE_NAME = "opencode-auto-qcgates";
 
 beforeAll(async () => {
   await rm(TEST_DIR, { recursive: true }).catch(() => {});
@@ -16,6 +23,30 @@ afterAll(async () => {
   await rm(TEST_DIR, { recursive: true });
 });
 
+async function makeFixture(name: string): Promise<string> {
+  const fixtureDir = join(TEST_DIR, name);
+  await rm(fixtureDir, { recursive: true, force: true });
+  await mkdir(fixtureDir, { recursive: true });
+  return fixtureDir;
+}
+
+async function invokeConfigHook(fixtureDir: string, input: Record<string, unknown> = {}): Promise<void> {
+  // @ts-ignore - PluginInput requires full context, we only need directory
+  const pluginResult = await plugin({ directory: fixtureDir });
+  // @ts-ignore - config returns async function that takes Config argument
+  await (pluginResult.config as ((input: unknown) => Promise<void>) | undefined)?.(input);
+}
+
+async function expectSkillPermissions(input: Record<string, unknown>): Promise<void> {
+  const agent = input.agent as Record<string, unknown> | undefined;
+  const task = agent?.task as Record<string, unknown> | undefined;
+  const permission = task?.permission as Record<string, unknown> | undefined;
+  const skillPermissions = permission?.skill as Record<string, string> | undefined;
+  expect(skillPermissions?.["test-baselining"]).toBe("allow");
+  expect(skillPermissions?.["regression-checking"]).toBe("allow");
+  expect(skillPermissions?.["grilling"]).toBe("allow");
+}
+
 describe("TestBaseliningPlugin", () => {
   test("plugin returns config function", async () => {
     // @ts-ignore - PluginInput requires full context, we only need directory
@@ -24,88 +55,193 @@ describe("TestBaseliningPlugin", () => {
     expect(typeof result.config).toBe("function");
   });
 
-  test("config hook performs zero disk writes in a repo without a local install", async () => {
-    const fixtureDir = join(TEST_DIR, "zero-write-repo");
-    await mkdir(fixtureDir, { recursive: true });
+  test("unregistered repo with nothing installed: config hook performs zero disk writes", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("zero-write-repo");
 
-    // @ts-ignore - PluginInput requires full context, we only need directory
-    const pluginResult = await plugin({ directory: fixtureDir });
-    const before = await snapshotDirectory(fixtureDir);
-    // @ts-ignore - config returns async function that takes Config argument
-    await (pluginResult.config as ((input: unknown) => Promise<void>) | undefined)?.({});
-    const after = await snapshotDirectory(fixtureDir);
+      const before = await snapshotDirectory(fixtureDir);
+      await invokeConfigHook(fixtureDir);
+      const after = await snapshotDirectory(fixtureDir);
 
-    expect(after).toEqual(before);
-    expect(Object.keys(after)).toEqual([]);
+      expect(after).toEqual(before);
+      expect(Object.keys(after)).toEqual([]);
+      expect(await exists(SANDBOX_GLOBAL_BASE)).toBe(false);
+    });
   });
 
-  test("config hook leaves an existing local install untouched on disk", async () => {
-    const fixtureDir = join(TEST_DIR, "existing-local-repo");
-    const localDir = join(fixtureDir, ".opencode");
-    await mkdir(localDir, { recursive: true });
-    await writeFile(
-      join(localDir, "opencode.json"),
-      JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: ["opencode-auto-qcgates"] }, null, 2)
-    );
+  test("repo-local registration: ensures repo assets and preserves the config file byte-for-byte", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("repo-local-ensure");
+      const configPath = join(fixtureDir, ".opencode", "opencode.json");
+      await mkdir(join(fixtureDir, ".opencode"), { recursive: true });
+      const configContent = JSON.stringify(
+        { $schema: "https://opencode.ai/config.json", model: "some/model", plugin: [PACKAGE_NAME] },
+        null,
+        2
+      );
+      await writeFile(configPath, configContent);
 
-    // @ts-ignore - PluginInput requires full context, we only need directory
-    const pluginResult = await plugin({ directory: fixtureDir });
-    const before = await snapshotDirectory(fixtureDir);
-    const input = {} as Record<string, unknown>;
-    // @ts-ignore - config returns async function that takes Config argument
-    await (pluginResult.config as ((input: unknown) => Promise<void>) | undefined)?.(input);
-    const after = await snapshotDirectory(fixtureDir);
+      const input = {} as Record<string, unknown>;
+      await invokeConfigHook(fixtureDir, input);
 
-    expect(after).toEqual(before);
-    const agent = input.agent as Record<string, unknown> | undefined;
-    const task = agent?.task as Record<string, unknown> | undefined;
-    const permission = task?.permission as Record<string, unknown> | undefined;
-    const skillPermissions = permission?.skill as Record<string, string> | undefined;
-    expect(skillPermissions?.["test-baselining"]).toBe("allow");
+      expect(await readFile(configPath, "utf-8")).toBe(configContent);
+      expect(await exists(join(fixtureDir, ".opencode", "skills", "test-baselining", "SKILL.md"))).toBe(true);
+      expect(await exists(join(fixtureDir, ".opencode", "commands", "test-baseline.md"))).toBe(true);
+      expect(await exists(join(fixtureDir, ".opencode", `${PACKAGE_NAME}.manifest.json`))).toBe(true);
+      expect(input["model"]).toBe("some/model");
+      expectSkillPermissions(input);
+    });
   });
 
-  test("config hook merges non-plugin local overrides in memory only", async () => {
-    const fixtureDir = join(TEST_DIR, "merge-overrides-repo");
-    const localDir = join(fixtureDir, ".opencode");
-    await mkdir(localDir, { recursive: true });
-    await writeFile(
-      join(localDir, "opencode.json"),
-      JSON.stringify({ $schema: "https://opencode.ai/config.json", model: "some/model", plugin: ["opencode-architect"] }, null, 2)
-    );
+  test("global registration: writes land only under the global config dir, repo untouched", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      await writeGlobalPluginConfig([PACKAGE_NAME]);
+      const fixtureDir = await makeFixture("global-context-fresh");
+      const repoBefore = await snapshotDirectory(fixtureDir);
 
-    // @ts-ignore - PluginInput requires full context, we only need directory
-    const pluginResult = await plugin({ directory: fixtureDir });
-    const input = {} as Record<string, unknown>;
-    // @ts-ignore - config returns async function that takes Config argument
-    await (pluginResult.config as ((input: unknown) => Promise<void>) | undefined)?.(input);
+      await invokeConfigHook(fixtureDir);
 
-    expect(input["model"]).toBe("some/model");
-    expect(input["$schema"]).toBe("https://opencode.ai/config.json");
-    expect(input["plugin"]).toBeUndefined();
-    const agent = input.agent as Record<string, unknown> | undefined;
-    const task = agent?.task as Record<string, unknown> | undefined;
-    const permission = task?.permission as Record<string, unknown> | undefined;
-    const skillPermissions = permission?.skill as Record<string, string> | undefined;
-    expect(skillPermissions?.["regression-checking"]).toBe("allow");
+      expect(await snapshotDirectory(fixtureDir)).toEqual(repoBefore);
+      expect(await exists(join(SANDBOX_GLOBAL_BASE, `${PACKAGE_NAME}.manifest.json`))).toBe(true);
+      expect(await exists(join(SANDBOX_GLOBAL_BASE, "skills", "test-baselining", "SKILL.md"))).toBe(true);
+      expect(await exists(join(SANDBOX_GLOBAL_BASE, "commands", "test-baseline.md"))).toBe(true);
+    });
+  });
+
+  test("global registration steady state: second load is a zero-write no-op", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      await writeGlobalPluginConfig([PACKAGE_NAME]);
+      const fixtureDir = await makeFixture("global-context-steady");
+
+      await invokeConfigHook(fixtureDir);
+      const globalBefore = await snapshotDirectory(SANDBOX_GLOBAL_BASE);
+      const repoBefore = await snapshotDirectory(fixtureDir);
+
+      await invokeConfigHook(fixtureDir);
+
+      expect(await snapshotDirectory(SANDBOX_GLOBAL_BASE)).toEqual(globalBefore);
+      expect(await snapshotDirectory(fixtureDir)).toEqual(repoBefore);
+    });
+  });
+
+  test("global registration version drift: updates the global scope only", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      await writeGlobalPluginConfig([PACKAGE_NAME]);
+      const fixtureDir = await makeFixture("global-context-drift");
+
+      await invokeConfigHook(fixtureDir);
+      const manifestPath = join(SANDBOX_GLOBAL_BASE, `${PACKAGE_NAME}.manifest.json`);
+      const manifest = JSON.parse(await readFile(manifestPath, "utf-8")) as { version: string };
+      manifest.version = "0.0.1";
+      await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+      const repoBefore = await snapshotDirectory(fixtureDir);
+
+      await invokeConfigHook(fixtureDir);
+
+      const rewritten = JSON.parse(await readFile(manifestPath, "utf-8")) as { version: string };
+      expect(rewritten.version).not.toBe("0.0.1");
+      expect(await snapshotDirectory(fixtureDir)).toEqual(repoBefore);
+    });
+  });
+
+  test("repo-root opencode.json registration: root file never touched, assets under .opencode", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("repo-root-registration");
+      const rootConfigPath = join(fixtureDir, "opencode.json");
+      const rootContent = JSON.stringify(
+        { $schema: "https://opencode.ai/config.json", model: "some/model", plugin: [PACKAGE_NAME] },
+        null,
+        2
+      );
+      await writeFile(rootConfigPath, rootContent);
+
+      await invokeConfigHook(fixtureDir);
+
+      expect(await readFile(rootConfigPath, "utf-8")).toBe(rootContent);
+      expect(await exists(join(fixtureDir, ".opencode", `${PACKAGE_NAME}.manifest.json`))).toBe(true);
+      expect(await exists(join(fixtureDir, ".opencode", "skills", "test-baselining", "SKILL.md"))).toBe(true);
+      expect(await exists(join(fixtureDir, ".opencode", "opencode.json"))).toBe(false);
+    });
+  });
+
+  test("global context with a valid local config lacking our plugin entry: zero repo writes", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      await writeGlobalPluginConfig([PACKAGE_NAME]);
+      const fixtureDir = await makeFixture("global-context-local-config");
+      const localDir = join(fixtureDir, ".opencode");
+      await mkdir(localDir, { recursive: true });
+      const configContent = JSON.stringify(
+        { $schema: "https://opencode.ai/config.json", plugin: ["opencode-architect"] },
+        null,
+        2
+      );
+      await writeFile(join(localDir, "opencode.json"), configContent);
+
+      await invokeConfigHook(fixtureDir);
+
+      expect(await readFile(join(localDir, "opencode.json"), "utf-8")).toBe(configContent);
+      expect(await exists(join(localDir, "skills"))).toBe(false);
+      expect(await exists(join(localDir, `${PACKAGE_NAME}.manifest.json`))).toBe(false);
+    });
+  });
+
+  test("global context with an unparseable local config: zero repo writes, file preserved", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      await writeGlobalPluginConfig([PACKAGE_NAME]);
+      const fixtureDir = await makeFixture("global-context-invalid-local");
+      const localDir = join(fixtureDir, ".opencode");
+      await mkdir(localDir, { recursive: true });
+      const invalidContent =
+        '{\n  "$schema": "https://opencode.ai/config.json",\n  "plugin": [\n    "opencode-architect"\n  ],\n}';
+      await writeFile(join(localDir, "opencode.json"), invalidContent);
+
+      await invokeConfigHook(fixtureDir);
+
+      expect(await readFile(join(localDir, "opencode.json"), "utf-8")).toBe(invalidContent);
+      expect(await exists(join(localDir, "skills"))).toBe(false);
+    });
+  });
+
+  test("merges non-plugin local overrides in memory only", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("merge-overrides-repo");
+      const localDir = join(fixtureDir, ".opencode");
+      await mkdir(localDir, { recursive: true });
+      const configContent = JSON.stringify(
+        {
+          $schema: "https://opencode.ai/config.json",
+          model: "some/model",
+          plugin: ["opencode-architect"],
+        },
+        null,
+        2
+      );
+      await writeFile(join(localDir, "opencode.json"), configContent);
+
+      const input = {} as Record<string, unknown>;
+      await invokeConfigHook(fixtureDir, input);
+
+      expect(await readFile(join(localDir, "opencode.json"), "utf-8")).toBe(configContent);
+      expect(input["model"]).toBe("some/model");
+      expect(input["$schema"]).toBe("https://opencode.ai/config.json");
+      expect(input["plugin"]).toBeUndefined();
+      expectSkillPermissions(input);
+    });
   });
 
   test("writes schema-compatible task skill permissions", async () => {
-    // @ts-ignore - PluginInput requires full context, we only need directory
-    const pluginResult = await plugin({ directory: TEST_DIR });
     const input = {} as Record<string, unknown>;
-    // @ts-ignore - config returns async function that takes Config argument
-    await (pluginResult.config as ((input: unknown) => Promise<void>) | undefined)?.(input);
-
-    const agent = (input as Record<string, unknown>).agent as Record<string, unknown> | undefined;
-    expect(agent).toBeDefined();
-    const task = agent?.task as Record<string, unknown> | undefined;
-    expect(task).toBeDefined();
-    const permission = task?.permission as Record<string, unknown> | undefined;
-    expect(permission).toBeDefined();
-    const skillPermissions = permission?.skill as Record<string, string> | undefined;
-    expect(skillPermissions?.["test-baselining"]).toBe("allow");
-    expect(skillPermissions?.["regression-checking"]).toBe("allow");
-    expect(skillPermissions?.["grilling"]).toBe("allow");
+    await invokeConfigHook(TEST_DIR, input);
+    expectSkillPermissions(input);
   });
 });
 
@@ -150,14 +286,13 @@ const REPRO_SCENARIOS: ReproScenario[] = [
   {
     name: "E-control-repo-up-to-date-local",
     setup: async dir => {
-      const skillDir = join(dir, ".opencode", "skills", "test-baselining");
-      await mkdir(skillDir, { recursive: true });
-      await writeFile(join(skillDir, ".version"), "1.3.1");
       const localDir = join(dir, ".opencode");
+      await mkdir(localDir, { recursive: true });
       await writeFile(
         join(localDir, "opencode.json"),
         JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: ["opencode-auto-qcgates"] }, null, 2)
       );
+      await install("local", dir, { addPluginConfig: false, migrateRootConfig: false, force: false });
     },
   },
 ];
@@ -175,35 +310,30 @@ describe("config hook repro scenarios ported from qcgates-repro", () => {
   });
 
   for (const scenario of REPRO_SCENARIOS) {
-    test(`scenario ${scenario.name} produces zero disk writes from the config hook`, async () => {
-      const fixtureDir = join(scenariosDir, scenario.name);
-      await mkdir(fixtureDir, { recursive: true });
-      await scenario.setup(fixtureDir);
+    test(`scenario ${scenario.name} produces zero repo disk writes from the config hook`, async () => {
+      await withGlobalSandbox(async () => {
+        await resetGlobalConfig();
+        const fixtureDir = join(scenariosDir, scenario.name);
+        await mkdir(fixtureDir, { recursive: true });
+        await scenario.setup(fixtureDir);
 
-      // @ts-ignore - PluginInput requires full context, we only need directory
-      const pluginResult = await plugin({ directory: fixtureDir });
-      const before = await snapshotDirectory(fixtureDir);
-      // @ts-ignore - config returns async function that takes Config argument
-      await (pluginResult.config as ((input: unknown) => Promise<void>) | undefined)?.({});
-      const after = await snapshotDirectory(fixtureDir);
+        const before = await snapshotDirectory(fixtureDir);
+        await invokeConfigHook(fixtureDir);
+        const after = await snapshotDirectory(fixtureDir);
 
-      expect(after).toEqual(before);
+        expect(after).toEqual(before);
+      });
     });
   }
 
   test("scenario E control still receives in-memory task skill permissions", async () => {
-    const fixtureDir = join(scenariosDir, "E-control-repo-up-to-date-local");
-    // @ts-ignore - PluginInput requires full context, we only need directory
-    const pluginResult = await plugin({ directory: fixtureDir });
-    const input = {} as Record<string, unknown>;
-    // @ts-ignore - config returns async function that takes Config argument
-    await (pluginResult.config as ((input: unknown) => Promise<void>) | undefined)?.(input);
-
-    const agent = input.agent as Record<string, unknown> | undefined;
-    const task = agent?.task as Record<string, unknown> | undefined;
-    const permission = task?.permission as Record<string, unknown> | undefined;
-    const skillPermissions = permission?.skill as Record<string, string> | undefined;
-    expect(skillPermissions?.["test-baselining"]).toBe("allow");
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = join(scenariosDir, "E-control-repo-up-to-date-local");
+      const input = {} as Record<string, unknown>;
+      await invokeConfigHook(fixtureDir, input);
+      expectSkillPermissions(input);
+    });
   });
 });
 
