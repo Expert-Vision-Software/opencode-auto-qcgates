@@ -1,8 +1,9 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { join } from "node:path";
-import { exists, mkdir, rm, readFile, writeFile } from "node:fs/promises";
+import { exists, mkdir, rm, writeFile } from "node:fs/promises";
 import plugin from "../plugin.ts";
 import { detectAurelia, detectOptionalSkills } from "../src/installer.ts";
+import { snapshotDirectory } from "./snapshot.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".test-temp");
 
@@ -23,23 +24,69 @@ describe("TestBaseliningPlugin", () => {
     expect(typeof result.config).toBe("function");
   });
 
-  test("installs skills and commands to target directory", async () => {
+  test("config hook performs zero disk writes in a repo without a local install", async () => {
+    const fixtureDir = join(TEST_DIR, "zero-write-repo");
+    await mkdir(fixtureDir, { recursive: true });
+
     // @ts-ignore - PluginInput requires full context, we only need directory
-    const result = await plugin({ directory: TEST_DIR });
+    const pluginResult = await plugin({ directory: fixtureDir });
+    const before = await snapshotDirectory(fixtureDir);
     // @ts-ignore - config returns async function that takes Config argument
-    await (result.config as ((input: unknown) => Promise<void>) | undefined)?.({});
+    await (pluginResult.config as ((input: unknown) => Promise<void>) | undefined)?.({});
+    const after = await snapshotDirectory(fixtureDir);
 
-    const skillPath = join(TEST_DIR, ".opencode", "skills", "test-baselining", "SKILL.md");
-    const commandPath = join(TEST_DIR, ".opencode", "commands", "test-baseline.md");
+    expect(after).toEqual(before);
+    expect(Object.keys(after)).toEqual([]);
+  });
 
-    expect(await exists(skillPath)).toBe(true);
-    expect(await exists(commandPath)).toBe(true);
+  test("config hook leaves an existing local install untouched on disk", async () => {
+    const fixtureDir = join(TEST_DIR, "existing-local-repo");
+    const localDir = join(fixtureDir, ".opencode");
+    await mkdir(localDir, { recursive: true });
+    await writeFile(
+      join(localDir, "opencode.json"),
+      JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: ["opencode-auto-qcgates"] }, null, 2)
+    );
 
-    const skillContent = await readFile(skillPath, "utf-8");
-    expect(skillContent).toContain("# Test Baselining");
+    // @ts-ignore - PluginInput requires full context, we only need directory
+    const pluginResult = await plugin({ directory: fixtureDir });
+    const before = await snapshotDirectory(fixtureDir);
+    const input = {} as Record<string, unknown>;
+    // @ts-ignore - config returns async function that takes Config argument
+    await (pluginResult.config as ((input: unknown) => Promise<void>) | undefined)?.(input);
+    const after = await snapshotDirectory(fixtureDir);
 
-    const commandContent = await readFile(commandPath, "utf-8");
-    expect(commandContent).toContain("test-baseline");
+    expect(after).toEqual(before);
+    const agent = input.agent as Record<string, unknown> | undefined;
+    const task = agent?.task as Record<string, unknown> | undefined;
+    const permission = task?.permission as Record<string, unknown> | undefined;
+    const skillPermissions = permission?.skill as Record<string, string> | undefined;
+    expect(skillPermissions?.["test-baselining"]).toBe("allow");
+  });
+
+  test("config hook merges non-plugin local overrides in memory only", async () => {
+    const fixtureDir = join(TEST_DIR, "merge-overrides-repo");
+    const localDir = join(fixtureDir, ".opencode");
+    await mkdir(localDir, { recursive: true });
+    await writeFile(
+      join(localDir, "opencode.json"),
+      JSON.stringify({ $schema: "https://opencode.ai/config.json", model: "some/model", plugin: ["opencode-architect"] }, null, 2)
+    );
+
+    // @ts-ignore - PluginInput requires full context, we only need directory
+    const pluginResult = await plugin({ directory: fixtureDir });
+    const input = {} as Record<string, unknown>;
+    // @ts-ignore - config returns async function that takes Config argument
+    await (pluginResult.config as ((input: unknown) => Promise<void>) | undefined)?.(input);
+
+    expect(input["model"]).toBe("some/model");
+    expect(input["$schema"]).toBe("https://opencode.ai/config.json");
+    expect(input["plugin"]).toBeUndefined();
+    const agent = input.agent as Record<string, unknown> | undefined;
+    const task = agent?.task as Record<string, unknown> | undefined;
+    const permission = task?.permission as Record<string, unknown> | undefined;
+    const skillPermissions = permission?.skill as Record<string, string> | undefined;
+    expect(skillPermissions?.["regression-checking"]).toBe("allow");
   });
 
   test("writes schema-compatible task skill permissions", async () => {

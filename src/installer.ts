@@ -505,7 +505,11 @@ export async function isLocalInstalled(projectDir: string): Promise<boolean> {
 
 export async function readLocalConfig(projectDir: string): Promise<Record<string, unknown> | null> {
   const localConfigPath = join(getLocalConfigPath(projectDir), "opencode.json");
-  return readJsonConfig(localConfigPath);
+  const config = await readJsonConfig(localConfigPath);
+  if (Object.keys(config).length === 0) {
+    return null;
+  }
+  return config;
 }
 
 export function mergeConfigWithOverrides(
