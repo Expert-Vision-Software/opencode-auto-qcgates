@@ -11,7 +11,7 @@ export interface ManifestFileEntry {
 export interface ManifestContents {
   version: string;
   files: ManifestFileEntry[];
-  optionalDependencies?: InstallOptionalDep[];
+  optionalDependencies: InstallOptionalDep[] | null;
 }
 
 export type ManifestFileDisposition = "write" | "keep" | "skip";
@@ -26,10 +26,7 @@ export class InstallManifest {
   static async read(manifestPath: string): Promise<InstallManifest> {
     try {
       const parsed = JSON.parse(await readFile(manifestPath, "utf-8"));
-      if (!InstallManifest.isWellFormed(parsed)) {
-        return new InstallManifest(null);
-      }
-      return new InstallManifest(parsed);
+      return new InstallManifest(InstallManifest.normalize(parsed));
     } catch {
       return new InstallManifest(null);
     }
@@ -41,10 +38,11 @@ export class InstallManifest {
     files: ManifestFileEntry[],
     optionalDependencies?: InstallOptionalDep[]
   ): Promise<void> {
-    const contents: ManifestContents = { version, files };
-    if (optionalDependencies !== undefined) {
-      contents.optionalDependencies = optionalDependencies;
-    }
+    const contents: ManifestContents = {
+      version,
+      files,
+      optionalDependencies: optionalDependencies ?? null,
+    };
     await writeFile(manifestPath, JSON.stringify(contents, null, 2) + "\n");
   }
 
@@ -108,29 +106,32 @@ export class InstallManifest {
     return relativePath.replaceAll("\\", "/");
   }
 
-  private static isWellFormed(value: unknown): value is ManifestContents {
+  private static normalize(value: unknown): ManifestContents | null {
     if (typeof value !== "object" || value === null) {
-      return false;
+      return null;
     }
     const candidate = value as Record<string, unknown>;
     if (typeof candidate["version"] !== "string") {
-      return false;
+      return null;
     }
-    if (!Array.isArray(candidate["files"])) {
-      return false;
+    if (
+      !Array.isArray(candidate["files"]) ||
+      !candidate["files"].every(entry => InstallManifest.isHashEntry(entry))
+    ) {
+      return null;
     }
-    if (!candidate["files"].every(entry => InstallManifest.isHashEntry(entry))) {
-      return false;
+    let optionalDependencies: InstallOptionalDep[] | null = null;
+    if (
+      Array.isArray(candidate["optionalDependencies"]) &&
+      candidate["optionalDependencies"].every(entry => InstallManifest.isOptionalDepEntry(entry))
+    ) {
+      optionalDependencies = candidate["optionalDependencies"] as InstallOptionalDep[];
     }
-    if (candidate["optionalDependencies"] !== undefined) {
-      if (!Array.isArray(candidate["optionalDependencies"])) {
-        return false;
-      }
-      if (!candidate["optionalDependencies"].every(entry => InstallManifest.isOptionalDepEntry(entry))) {
-        return false;
-      }
-    }
-    return true;
+    return {
+      version: candidate["version"],
+      files: candidate["files"] as ManifestFileEntry[],
+      optionalDependencies,
+    };
   }
 
   private static isHashEntry(value: unknown): value is ManifestFileEntry {

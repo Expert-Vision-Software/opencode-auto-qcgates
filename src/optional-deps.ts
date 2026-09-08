@@ -65,6 +65,13 @@ export const EMPTY_PACKAGE_MANIFEST: PackageManifest = {
 
 const KINDS: readonly string[] = ["skill", "agent", "mcp", "plugin"];
 const SOURCE_TYPES: readonly string[] = ["bundled", "external-skill", "npm", "command", "url"];
+const SOURCE_REQUIRED_FIELDS: Record<string, readonly string[]> = {
+  bundled: ["path"],
+  "external-skill": ["repo", "skill"],
+  npm: ["package"],
+  command: ["command"],
+  url: ["url"],
+};
 
 export const PACKAGE_MANIFEST_RELPATH = join("assets", "manifest.json");
 
@@ -110,27 +117,12 @@ function validateSource(value: unknown, path: string, errors: string[]): void {
     return;
   }
   const source = value as Record<string, unknown>;
-  if (typeof source["type"] !== "string" || !SOURCE_TYPES.includes(source["type"])) {
+  if (typeof source["type"] !== "string" || SOURCE_REQUIRED_FIELDS[source["type"]] === undefined) {
     errors.push(`${path}.type: unknown source type (expected one of ${SOURCE_TYPES.join(", ")})`);
     return;
   }
-  switch (source["type"]) {
-    case "bundled":
-      requireNonEmptyString(source["path"], `${path}.path`, errors);
-      break;
-    case "external-skill":
-      requireNonEmptyString(source["repo"], `${path}.repo`, errors);
-      requireNonEmptyString(source["skill"], `${path}.skill`, errors);
-      break;
-    case "npm":
-      requireNonEmptyString(source["package"], `${path}.package`, errors);
-      break;
-    case "command":
-      requireNonEmptyString(source["command"], `${path}.command`, errors);
-      break;
-    case "url":
-      requireNonEmptyString(source["url"], `${path}.url`, errors);
-      break;
+  for (const field of SOURCE_REQUIRED_FIELDS[source["type"]]) {
+    requireNonEmptyString(source[field], `${path}.${field}`, errors);
   }
 }
 
@@ -190,8 +182,21 @@ export function isValidOptionalDepEntry(value: unknown): value is PackageOptiona
   return errors.length === 0;
 }
 
+function canonical(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(entry => canonical(entry)).join(",")}]`;
+  }
+  if (typeof value === "object" && value !== null) {
+    const entries = Object.keys(value)
+      .sort()
+      .map(key => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`);
+    return `{${entries.join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
 function sameDeclaration(a: PackageOptionalDep, b: PackageOptionalDep): boolean {
-  return a.kind === b.kind && JSON.stringify(a.source) === JSON.stringify(b.source);
+  return a.kind === b.kind && canonical(a.source) === canonical(b.source);
 }
 
 export interface OptionalDepMergeResult {
@@ -226,6 +231,6 @@ export function mergeOptionalDependencies(
 
   return {
     dependencies: merged,
-    changed: JSON.stringify(merged) !== JSON.stringify(prior),
+    changed: canonical(merged) !== canonical(prior),
   };
 }

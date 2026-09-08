@@ -2,6 +2,7 @@ import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { join } from "node:path";
 import { mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import { install } from "../src/installer.ts";
+import { InstallManifest } from "../src/manifest.ts";
 import {
   validatePackageManifest,
   mergeOptionalDependencies,
@@ -386,7 +387,7 @@ describe("install optionalDependencies integration", () => {
 
   async function readSection(manifestPath: string): Promise<InstallOptionalDep[]> {
     const manifest = JSON.parse(await readFile(manifestPath, "utf-8")) as {
-      optionalDependencies?: InstallOptionalDep[];
+      optionalDependencies: InstallOptionalDep[] | null;
     };
     return manifest.optionalDependencies ?? [];
   }
@@ -459,6 +460,114 @@ describe("install optionalDependencies integration", () => {
 
     expect(second.action).toBe("noop");
     const deps = await readSection(first.manifestPath);
+    expect(deps.map(dep => dep.id)).toEqual(["grilling"]);
+    expect(deps[0].state).toBe("pending");
+  });
+});
+
+describe("mergeOptionalDependencies canonical equality", () => {
+  test("a source object with reordered keys is not a changed declaration", () => {
+    const grilling: PackageOptionalDep = {
+      id: "grilling",
+      kind: "skill",
+      description: "Interview loop.",
+      source: { type: "external-skill", repo: "mattpocock/skills", skill: "grilling" },
+    };
+    const reordered: PackageOptionalDep = {
+      ...grilling,
+      source: { skill: "grilling", repo: "mattpocock/skills", type: "external-skill" },
+    };
+    const first = mergeOptionalDependencies(undefined, [grilling]);
+    const second = mergeOptionalDependencies(
+      first.dependencies.map(dep => ({ ...dep, state: "accepted" as const })),
+      [reordered]
+    );
+    expect(second.dependencies[0].state).toBe("accepted");
+    expect(second.changed).toBe(false);
+  });
+});
+
+describe("InstallManifest.read optionalDependencies handling", () => {
+  const FIXTURES = join(import.meta.dirname, ".test-install-manifest-optdeps");
+
+  beforeAll(async () => {
+    await rm(FIXTURES, { recursive: true, force: true });
+    await mkdir(FIXTURES, { recursive: true });
+  });
+
+  afterAll(async () => {
+    await rm(FIXTURES, { recursive: true, force: true });
+  });
+
+  function validFiles(): Array<{ path: string; hash: string }> {
+    return [{ path: "skills/test-baselining/SKILL.md", hash: "a".repeat(64) }];
+  }
+
+  test("a malformed dep entry degrades the section but keeps the manifest contents", async () => {
+    const manifestPath = join(FIXTURES, "bad-entry.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        version: "1.0.0",
+        files: validFiles(),
+        optionalDependencies: [{ id: "grilling", state: "bogus" }],
+      })
+    );
+
+    const manifest = await InstallManifest.read(manifestPath);
+
+    expect(manifest.hasContents()).toBe(true);
+    expect(manifest.version).toBe("1.0.0");
+    expect(manifest.recordedHash("skills/test-baselining/SKILL.md")).toBe("a".repeat(64));
+    expect(manifest.optionalDependencies).toEqual([]);
+  });
+
+  test("a non-array dep section degrades the section but keeps the manifest contents", async () => {
+    const manifestPath = join(FIXTURES, "bad-section.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({ version: "1.0.0", files: validFiles(), optionalDependencies: "nope" })
+    );
+
+    const manifest = await InstallManifest.read(manifestPath);
+
+    expect(manifest.hasContents()).toBe(true);
+    expect(manifest.optionalDependencies).toEqual([]);
+  });
+});
+
+describe("install survives a corrupted dep section without clobbering user files", () => {
+  const TEST_DIR = join(import.meta.dirname, ".test-corrupt-optdeps");
+  const INSTALL_OPTIONS = { addPluginConfig: false, migrateRootConfig: false, force: false } as const;
+
+  beforeAll(async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+    await mkdir(TEST_DIR, { recursive: true });
+  });
+
+  afterAll(async () => {
+    await rm(TEST_DIR, { recursive: true, force: true });
+  });
+
+  test("a drifted skill file stays skipped when the dep section is malformed", async () => {
+    const fixtureDir = join(TEST_DIR, "drift-corrupt");
+    await mkdir(fixtureDir, { recursive: true });
+    const first = await install("local", fixtureDir, INSTALL_OPTIONS);
+
+    const skillFile = join(fixtureDir, ".opencode", "skills", "test-baselining", "SKILL.md");
+    await writeFile(skillFile, "# consumer modified this file");
+
+    const manifest = JSON.parse(await readFile(first.manifestPath, "utf-8")) as Record<string, unknown>;
+    manifest["optionalDependencies"] = [{ id: "grilling", state: "bogus" }];
+    await writeFile(first.manifestPath, JSON.stringify(manifest, null, 2));
+
+    const second = await install("local", fixtureDir, INSTALL_OPTIONS);
+
+    expect(second.skipped).toEqual(["skills/test-baselining/SKILL.md"]);
+    expect(await readFile(skillFile, "utf-8")).toBe("# consumer modified this file");
+    const deps = (JSON.parse(await readFile(first.manifestPath, "utf-8")) as {
+      optionalDependencies: Array<{ id: string; state: string }> | null;
+    }).optionalDependencies ?? [];
     expect(deps.map(dep => dep.id)).toEqual(["grilling"]);
     expect(deps[0].state).toBe("pending");
   });

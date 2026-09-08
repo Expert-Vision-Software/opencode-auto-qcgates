@@ -673,8 +673,16 @@ export async function detectAurelia(projectDir: string): Promise<AureliaRecommen
   return { detected: true, message };
 }
 
-function externalSkillRecommendation(dep: PackageOptionalDep, source: ExternalSkillSource): string {
-  const { repo, skill } = source;
+function isExternalSkill(
+  dep: PackageOptionalDep
+): dep is PackageOptionalDep & { source: ExternalSkillSource } {
+  return dep.source.type === "external-skill";
+}
+
+function externalSkillRecommendation(
+  dep: PackageOptionalDep & { source: ExternalSkillSource }
+): string {
+  const { repo, skill } = dep.source;
   return [
     `Optional skill not detected: \`${dep.id}\``,
     `  Purpose: ${dep.description}`,
@@ -699,17 +707,14 @@ export async function detectOptionalSkills(
   }
 
   for (const dep of pkgManifest.manifest.optionalDependencies) {
-    if (dep.kind !== "skill") {
-      continue;
-    }
-    if (dep.source.type !== "external-skill") {
+    if (dep.kind !== "skill" || !isExternalSkill(dep)) {
       continue;
     }
     const skillPath = join(configBase, "skills", dep.id);
     if (await exists(skillPath)) {
       continue;
     }
-    recs.push(externalSkillRecommendation(dep, dep.source));
+    recs.push(externalSkillRecommendation(dep));
   }
 
   return recs;
