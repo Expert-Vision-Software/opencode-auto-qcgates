@@ -55,17 +55,17 @@ export async function installCommand(options: InstallCommandOptions): Promise<vo
     }
   }
 
-  let installOptions: InstallOptions = {
-    addPluginConfig: true,
-  };
+  let addPluginConfig = true;
 
   if (interactive) {
-    const addPluginConfig = await confirmPluginConfig();
-
-    installOptions = {
-      addPluginConfig,
-    };
+    addPluginConfig = await confirmPluginConfig();
   }
+
+  const installOptions: InstallOptions = {
+    addPluginConfig,
+    migrateRootConfig: true,
+    force: options.force === true,
+  };
 
   const result = await install(scope, projectDir, installOptions);
 

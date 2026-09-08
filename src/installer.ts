@@ -1,6 +1,7 @@
 import { exists, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { PluginNameNormalizer } from "./plugin-name.ts";
 
 export type Scope = "local" | "global";
 
@@ -17,7 +18,18 @@ export class ScopeResolver {
 }
 
 export interface InstallOptions {
-  addPluginConfig?: boolean;
+  addPluginConfig: boolean;
+  migrateRootConfig: boolean;
+  force: boolean;
+}
+
+export type RootConfigConflictHandler = (
+  root: Record<string, unknown>,
+  dot: Record<string, unknown>
+) => Promise<boolean>;
+
+export interface RootMigrationOptions {
+  enabled: boolean;
 }
 
 export interface InstallResult {
@@ -93,6 +105,23 @@ function getPackageDir(): string {
   return join(import.meta.dirname, "..");
 }
 
+async function resolvePackageDir(): Promise<string> {
+  const packageDir = getPackageDir();
+  const assetsSkillsPath = join(packageDir, "assets", "skills");
+  if (!(await exists(assetsSkillsPath))) {
+    throw new Error(
+      `Package assets not found at ${assetsSkillsPath}. ` +
+        `Installs must run from the published package (e.g. "bunx ${await getPackageName()}@latest install" ` +
+        `or a global install), never from a partial cache artifact.`
+    );
+  }
+  return packageDir;
+}
+
+function isFileNotFoundError(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
 async function copyDir(src: string, dest: string): Promise<void> {
   await mkdir(dest, { recursive: true });
   for (const entry of await readdir(src, { withFileTypes: true })) {
@@ -106,12 +135,20 @@ async function copyDir(src: string, dest: string): Promise<void> {
   }
 }
 
-async function readJsonConfig(path: string): Promise<Record<string, unknown>> {
+async function readJsonConfig(path: string): Promise<Record<string, unknown> | null> {
+  let content: string;
   try {
-    const content = await readFile(path, "utf-8");
+    content = await readFile(path, "utf-8");
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return {};
+    }
+    return null;
+  }
+  try {
     return JSON.parse(content);
   } catch {
-    return {};
+    return null;
   }
 }
 
@@ -120,19 +157,26 @@ async function writeJsonConfig(path: string, config: Record<string, unknown>): P
   await writeFile(path, JSON.stringify(config, null, 2));
 }
 
-async function addPluginToConfig(configPath: string, pluginName: string): Promise<boolean> {
+async function addPluginToConfig(configPath: string, packageName: string): Promise<boolean> {
   const config = await readJsonConfig(configPath);
+  if (config === null) {
+    console.warn(
+      `[${packageName}] Refusing to write ${configPath}: the file is not valid JSON. ` +
+        `Fix or remove the file, then re-run install. The file was left unchanged.`
+    );
+    return false;
+  }
 
   if (!config.plugin) {
     config.plugin = [];
   }
 
   const plugins = config.plugin as string[];
-  if (plugins.includes(pluginName)) {
+  if (plugins.some(entry => PluginNameNormalizer.matches(entry, packageName))) {
     return false;
   }
 
-  plugins.push(pluginName);
+  plugins.push(PluginNameNormalizer.canonicalize(packageName));
   config.plugin = plugins;
 
   await mkdir(join(configPath, ".."), { recursive: true });
@@ -140,26 +184,31 @@ async function addPluginToConfig(configPath: string, pluginName: string): Promis
   return true;
 }
 
-async function removePluginFromConfig(configPath: string, pluginName: string): Promise<boolean> {
+async function removePluginFromConfig(configPath: string, packageName: string): Promise<boolean> {
   const config = await readJsonConfig(configPath);
+  if (config === null) {
+    console.warn(
+      `[${packageName}] Refusing to write ${configPath}: the file is not valid JSON. ` +
+        `Fix or remove the file manually. The file was left unchanged.`
+    );
+    return false;
+  }
 
   if (!config.plugin) {
     return false;
   }
 
   const plugins = config.plugin as string[];
-  const index = plugins.indexOf(pluginName);
+  const remaining = plugins.filter(entry => !PluginNameNormalizer.matches(entry, packageName));
 
-  if (index === -1) {
+  if (remaining.length === plugins.length) {
     return false;
   }
 
-  plugins.splice(index, 1);
-
-  if (plugins.length === 0) {
+  if (remaining.length === 0) {
     delete config.plugin;
   } else {
-    config.plugin = plugins;
+    config.plugin = remaining;
   }
 
   await mkdir(join(configPath, ".."), { recursive: true });
@@ -167,15 +216,18 @@ async function removePluginFromConfig(configPath: string, pluginName: string): P
   return true;
 }
 
-async function isPluginInConfig(configPath: string, pluginName: string): Promise<boolean> {
+async function isPluginInConfig(configPath: string, packageName: string): Promise<boolean> {
   const config = await readJsonConfig(configPath);
+  if (config === null) {
+    return false;
+  }
 
   if (!config.plugin) {
     return false;
   }
 
   const plugins = config.plugin as string[];
-  return plugins.includes(pluginName);
+  return plugins.some(entry => PluginNameNormalizer.matches(entry, packageName));
 }
 
 export async function checkMigrationNeeded(projectDir: string): Promise<{
@@ -215,12 +267,25 @@ export async function checkMigrationNeeded(projectDir: string): Promise<{
 
 export async function migrateRootConfig(
   projectDir: string,
-  onConflict?: (root: Record<string, unknown>, dot: Record<string, unknown>) => Promise<boolean>
+  options: RootMigrationOptions,
+  onConflict: RootConfigConflictHandler | null = null
 ): Promise<boolean> {
+  if (!options.enabled) {
+    return false;
+  }
+
   const { needed, rootConfigPath, dotOpenencodeConfigPath, rootConfig, dotOpenencodeConfig } =
     await checkMigrationNeeded(projectDir);
 
   if (!needed || !rootConfig) {
+    return false;
+  }
+
+  if (dotOpenencodeConfig === null && (await exists(dotOpenencodeConfigPath))) {
+    console.warn(
+      `Refusing to migrate ${rootConfigPath}: ${dotOpenencodeConfigPath} is not valid JSON. ` +
+        `Both files were left unchanged.`
+    );
     return false;
   }
 
@@ -247,20 +312,20 @@ export async function migrateRootConfig(
 export async function install(
   scope: Scope,
   projectDir: string = process.cwd(),
-  options: InstallOptions = {}
+  options: InstallOptions
 ): Promise<InstallResult> {
   const packageName = await getPackageName();
-  const pkgDir = getPackageDir();
+  const pkgDir = await resolvePackageDir();
 
-  const { addPluginConfig = true } = options;
+  const { addPluginConfig, migrateRootConfig: allowRootMigration, force } = options;
 
   const configBase = scope === "global" ? getGlobalConfigPath() : getLocalConfigPath(projectDir);
   const configPath = join(configBase, "opencode.json");
 
   let migrated = false;
 
-  if (scope === "local") {
-    migrated = await migrateRootConfig(projectDir);
+  if (scope === "local" && allowRootMigration) {
+    migrated = await migrateRootConfig(projectDir, { enabled: true });
   }
 
   const skillPaths: string[] = [];
@@ -506,6 +571,9 @@ export async function isLocalInstalled(projectDir: string): Promise<boolean> {
 export async function readLocalConfig(projectDir: string): Promise<Record<string, unknown> | null> {
   const localConfigPath = join(getLocalConfigPath(projectDir), "opencode.json");
   const config = await readJsonConfig(localConfigPath);
+  if (config === null) {
+    return null;
+  }
   if (Object.keys(config).length === 0) {
     return null;
   }
