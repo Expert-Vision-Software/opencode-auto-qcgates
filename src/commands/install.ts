@@ -69,7 +69,12 @@ export async function installCommand(options: InstallCommandOptions): Promise<vo
 
   const result = await install(scope, projectDir, installOptions);
 
-  console.log(`\nInstalled ${packageName} ${scope === "global" ? "globally" : "locally"}:`);
+  if (result.action === "noop") {
+    console.log(`\n${packageName} is already up to date in the ${scope} location:`);
+  } else {
+    console.log(`\nInstalled ${packageName} ${scope === "global" ? "globally" : "locally"}:`);
+  }
+
   if (result.skillPaths.length > 0) {
     console.log(`  Skills: ${result.skillPaths.join(", ")}`);
   }
@@ -77,6 +82,11 @@ export async function installCommand(options: InstallCommandOptions): Promise<vo
     console.log(`  Commands: ${result.commandPaths.join(", ")}`);
   }
   console.log(`  Config: ${result.configPath}`);
+  console.log(`  Manifest: ${result.manifestPath}`);
+
+  for (const skippedPath of result.skipped) {
+    console.log(`  Skipped (changed locally; re-run with --force to overwrite): ${skippedPath}`);
+  }
 
   if (result.migrated) {
     console.log(`  Migrated: opencode.json → .opencode/opencode.json`);
