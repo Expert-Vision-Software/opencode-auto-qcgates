@@ -4,6 +4,7 @@ import { mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import { InstallManifest } from "../src/manifest.ts";
 import {
   applyOptionalDepDecisions,
+  runOptionalDepsConsent,
   type CommandExecutor,
   type OptionalDepsContext,
 } from "../src/optional-deps-actions.ts";
@@ -147,5 +148,72 @@ describe("applyOptionalDepDecisions", () => {
     await applyOptionalDepDecisions(ctx, [otherDep("pending")], [], exec);
 
     expect(calls).toEqual([]);
+  });
+});
+
+async function captureOutput(operation: () => Promise<void>): Promise<string[]> {
+  const lines: string[] = [];
+  const originalLog = console.log;
+  console.log = (message: unknown) => {
+    lines.push(String(message));
+  };
+  try {
+    await operation();
+  } finally {
+    console.log = originalLog;
+  }
+  return lines;
+}
+
+describe("runOptionalDepsConsent", () => {
+  test("no pending deps skips the flow entirely", async () => {
+    const ctx = await makeFixture("gate-none", [otherDep("declined")]);
+
+    const result = await runOptionalDepsConsent(ctx, [otherDep("declined")], { interactive: true });
+
+    expect(result).toBeNull();
+    const deps = await readDeps(ctx);
+    expect(deps[0].state).toBe("declined");
+  });
+
+  test("a non-interactive session skips prompts, leaves state pending, and explains why", async () => {
+    const dep = otherDep("pending");
+    const ctx = await makeFixture("gate-nontty", [dep]);
+
+    let selected = false;
+    const lines = await captureOutput(async () => {
+      const result = await runOptionalDepsConsent(ctx, [dep], {
+        interactive: false,
+        select: async () => {
+          selected = true;
+          return [];
+        },
+      });
+      expect(result).toBeNull();
+    });
+
+    expect(selected).toBe(false);
+    const deps = await readDeps(ctx);
+    expect(deps[0].state).toBe("pending");
+    expect(lines.join("\n")).toContain("grilling");
+    expect(lines.join("\n")).toContain("Non-interactive");
+  });
+
+  test("an interactive session applies the checkbox selection and reports outcomes", async () => {
+    const dep = otherDep("pending");
+    const ctx = await makeFixture("gate-tty", [dep]);
+    const exec: CommandExecutor = async () => 0;
+    const lines = await captureOutput(async () => {
+      const result = await runOptionalDepsConsent(ctx, [dep], {
+        interactive: true,
+        select: async pending => pending.map(d => d.id),
+        exec,
+      });
+      expect(result?.applied.map(a => a.id)).toEqual(["grilling"]);
+    });
+
+    const deps = await readDeps(ctx);
+    expect(deps[0].state).toBe("accepted");
+    expect(lines.join("\n")).toContain("grilling");
   });
 });

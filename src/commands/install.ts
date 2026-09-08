@@ -1,4 +1,5 @@
 import { select } from "@inquirer/prompts";
+import { dirname, join } from "node:path";
 import {
   install,
   checkMigrationNeeded,
@@ -6,6 +7,8 @@ import {
   type Scope,
   type InstallOptions,
 } from "../installer.ts";
+import { InstallManifest } from "../manifest.ts";
+import { runOptionalDepsConsent } from "../optional-deps-actions.ts";
 import { confirmOverwrite, confirmPluginConfig } from "../prompts.ts";
 
 interface InstallCommandOptions {
@@ -97,4 +100,19 @@ export async function installCommand(options: InstallCommandOptions): Promise<vo
   }
 
   printRecommendations(result.recommendations);
+
+  const manifest = await InstallManifest.read(result.manifestPath);
+  if (manifest.optionalDependencies.length > 0) {
+    await runOptionalDepsConsent(
+      {
+        scope: result.scope,
+        configBase: dirname(result.manifestPath),
+        configPath: result.configPath,
+        manifestPath: result.manifestPath,
+        packageDir: join(import.meta.dirname, "..", ".."),
+        packageName,
+      },
+      manifest.optionalDependencies
+    );
+  }
 }

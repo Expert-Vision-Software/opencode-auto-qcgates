@@ -291,4 +291,63 @@ export async function applyOptionalDepDecisions(
   }
 
   return { applied, declined, failed, changed };
+}
+
+export function isInteractiveStdio(): boolean {
+  return process.stdin.isTTY === true && process.stdout.isTTY === true;
+}
+
+export async function selectPendingOptionalDeps(pending: InstallOptionalDep[]): Promise<string[]> {
+  const { checkbox } = await import("@inquirer/prompts");
+  return checkbox({
+    message: "Optional dependencies — check to accept, leave unchecked to decline:",
+    choices: pending.map(dep => ({
+      name: `${dep.id} (${dep.kind}) — ${dep.description}`,
+      value: dep.id,
+      checked: false,
+    })),
+  });
+}
+
+export function printDepRunResult(result: DepRunResult): void {
+  for (const entry of result.applied) {
+    console.log(`  ${entry.message}`);
+  }
+  if (result.declined.length > 0) {
+    console.log(`  Declined (recorded): ${result.declined.join(", ")}`);
+  }
+  for (const failure of result.failed) {
+    console.warn(`  Failed: ${failure.id} — ${failure.reason}`);
+  }
+}
+
+export interface ConsentOptions {
+  interactive?: boolean;
+  select?: (pending: InstallOptionalDep[]) => Promise<string[]>;
+  exec?: CommandExecutor;
+}
+
+export async function runOptionalDepsConsent(
+  ctx: OptionalDepsContext,
+  deps: InstallOptionalDep[],
+  options: ConsentOptions = {}
+): Promise<DepRunResult | null> {
+  const pending = deps.filter(dep => dep.state === "pending");
+  if (pending.length === 0) {
+    return null;
+  }
+  const interactive = options.interactive ?? isInteractiveStdio();
+  if (!interactive) {
+    console.log(
+      `\nOptional dependencies pending consent: ${pending.map(dep => dep.id).join(", ")}` +
+        `\n  Non-interactive session — nothing was auto-installed; they remain pending.` +
+        `\n  Re-run the installer interactively or choose "Manage optional dependencies" to review them.`
+    );
+    return null;
+  }
+  const select = options.select ?? selectPendingOptionalDeps;
+  const acceptedIds = await select(pending);
+  const result = await applyOptionalDepDecisions(ctx, deps, acceptedIds, options.exec);
+  printDepRunResult(result);
+  return result;
 };
