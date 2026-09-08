@@ -3,6 +3,13 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { PluginNameNormalizer } from "./plugin-name.ts";
 import { InstallManifest, type ManifestFileEntry } from "./manifest.ts";
+import {
+  loadPackageManifest,
+  mergeOptionalDependencies,
+  PACKAGE_MANIFEST_RELPATH,
+  type ExternalSkillSource,
+  type PackageOptionalDep,
+} from "./optional-deps.ts";
 
 export type Scope = "local" | "global";
 
@@ -489,9 +496,23 @@ export async function install(
   const action: InstallAction =
     writtenRelativePaths.length === 0 ? "noop" : manifest.hasContents() ? "upgraded" : "installed";
 
-  if (action !== "noop") {
-    await removeStaleVersionMarkers(join(configBase, "skills"));
-    await InstallManifest.write(manifestPath, packageVersion, recordedFiles);
+  const pkgManifest = await loadPackageManifest(pkgDir);
+  let declaredDeps: PackageOptionalDep[] = [];
+  if (!pkgManifest.ok) {
+    console.warn(
+      `[${packageName}] Ignoring invalid ${PACKAGE_MANIFEST_RELPATH}: ${pkgManifest.errors.join("; ")}`
+    );
+  } else {
+    declaredDeps = pkgManifest.manifest.optionalDependencies;
+  }
+  const depMerge = mergeOptionalDependencies(manifest.optionalDependencies, declaredDeps);
+
+  if (action !== "noop" || depMerge.changed) {
+    if (action !== "noop") {
+      await removeStaleVersionMarkers(join(configBase, "skills"));
+    }
+    const filesToRecord = action === "noop" ? manifest.files : recordedFiles;
+    await InstallManifest.write(manifestPath, packageVersion, filesToRecord, depMerge.dependencies);
   }
 
   let pluginAdded = false;
@@ -652,27 +673,48 @@ export async function detectAurelia(projectDir: string): Promise<AureliaRecommen
   return { detected: true, message };
 }
 
-export async function detectOptionalSkills(configBase: string): Promise<string[]> {
+function isExternalSkill(
+  dep: PackageOptionalDep
+): dep is PackageOptionalDep & { source: ExternalSkillSource } {
+  return dep.source.type === "external-skill";
+}
+
+function externalSkillRecommendation(
+  dep: PackageOptionalDep & { source: ExternalSkillSource }
+): string {
+  const { repo, skill } = dep.source;
+  return [
+    `Optional skill not detected: \`${dep.id}\``,
+    `  Purpose: ${dep.description}`,
+    `  Source:  github.com/${repo}. Not shipped by this plugin.`,
+    "  One-shot (no permanent install — init captures the generated prompt):",
+    `    CI=true npx -y skills use ${repo} --skill ${skill}`,
+    "  Permanent install (default agent `universal` if your agent is unknown):",
+    `    npx -y skills add ${repo} --skill ${skill} -a universal`,
+    `  After a permanent install, \`loadSkill({ name: "${skill}" })\` resolves directly from the agent's skills path.`,
+  ].join("\n");
+}
+
+export async function detectOptionalSkills(
+  configBase: string,
+  packageDir: string = getPackageDir()
+): Promise<string[]> {
   const recs: string[] = [];
 
-  // `grilling` — used by /test-baseline init when tiers can't be inferred
-  // (no manifest at the source-control root, or the inline tier grill fails to
-  // converge). Not shipped by this plugin; fetched on demand via the consumer
-  // running `npx -y skills use` (one-shot) or `npx -y skills add` (permanent).
-  const grillingPath = join(configBase, "skills", "grilling");
-  if (!(await exists(grillingPath))) {
-    recs.push(
-      [
-        "Optional skill not detected: `grilling`",
-        "  Purpose: interview loop for `/test-baseline init` when the consumer has no recognizable manifest or its tier set can't be inferred.",
-        "  Source:  github.com/mattpocock/skills (MIT). Not shipped by this plugin.",
-        "  One-shot (no permanent install — init captures the generated prompt):",
-        "    CI=true npx -y skills use mattpocock/skills --skill grilling",
-        "  Permanent install (default agent `universal` if your agent is unknown):",
-        "    npx -y skills add mattpocock/skills --skill grilling -a universal",
-        "  After a permanent install, `loadSkill({ name: \"grilling\" })` resolves directly from the agent's skills path.",
-      ].join("\n")
-    );
+  const pkgManifest = await loadPackageManifest(packageDir);
+  if (!pkgManifest.ok) {
+    return recs;
+  }
+
+  for (const dep of pkgManifest.manifest.optionalDependencies) {
+    if (dep.kind !== "skill" || !isExternalSkill(dep)) {
+      continue;
+    }
+    const skillPath = join(configBase, "skills", dep.id);
+    if (await exists(skillPath)) {
+      continue;
+    }
+    recs.push(externalSkillRecommendation(dep));
   }
 
   return recs;

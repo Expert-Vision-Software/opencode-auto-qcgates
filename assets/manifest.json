@@ -1,0 +1,15 @@
+{
+  "manifestVersion": 1,
+  "optionalDependencies": [
+    {
+      "id": "grilling",
+      "kind": "skill",
+      "description": "Interview loop for `/test-baseline init` when the consumer has no recognizable manifest or its tier set can't be inferred.",
+      "source": {
+        "type": "external-skill",
+        "repo": "mattpocock/skills",
+        "skill": "grilling"
+      }
+    }
+  ]
+}
