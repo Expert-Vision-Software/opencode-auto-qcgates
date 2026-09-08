@@ -329,7 +329,7 @@ async function removePluginFromConfig(configPath: string, packageName: string): 
   return true;
 }
 
-async function isPluginInConfig(configPath: string, packageName: string): Promise<boolean> {
+export async function isPluginInConfig(configPath: string, packageName: string): Promise<boolean> {
   const config = await readJsonConfig(configPath);
   if (config === null) {
     return false;
@@ -584,6 +584,10 @@ export async function status(projectDir: string = process.cwd()): Promise<Status
     local: await readScopeStatus(getLocalConfigPath(projectDir), packageName),
     global: await readScopeStatus(getGlobalConfigPath(), packageName),
   };
+}
+
+export async function isScopeInstalled(configBase: string, packageName: string): Promise<boolean> {
+  return (await readScopeStatus(configBase, packageName)) !== null;
 }
 
 async function readScopeStatus(configBase: string, packageName: string): Promise<ScopeStatus | null> {

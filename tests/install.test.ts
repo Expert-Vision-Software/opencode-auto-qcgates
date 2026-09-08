@@ -4,6 +4,7 @@ import { exists, mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import { install, migrateRootConfig, uninstall } from "../src/installer.ts";
 import { PluginNameNormalizer } from "../src/plugin-name.ts";
 import { snapshotDirectory } from "./snapshot.ts";
+import { SANDBOX_GLOBAL_BASE, resetGlobalConfig, withGlobalSandbox } from "./global-sandbox.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".test-install");
 const PACKAGE_NAME = "opencode-auto-qcgates";
@@ -275,22 +276,14 @@ describe("install manifest", () => {
   });
 
   test("global scope places the manifest at the root of the effective global config dir", async () => {
-    const fixtureDir = await makeFixture("manifest-global");
-    const sandboxXdg = join(fixtureDir, "xdg");
-    const originalXdg = process.env.XDG_CONFIG_HOME;
-    process.env.XDG_CONFIG_HOME = sandboxXdg;
-    try {
+    await withGlobalSandbox(async () => {
+      const fixtureDir = await makeFixture("manifest-global");
+      await resetGlobalConfig();
       const result = await install("global", fixtureDir, INSTALL_OPTIONS);
       expect(result.action).toBe("installed");
-      expect(result.manifestPath).toBe(join(sandboxXdg, "opencode", `${PACKAGE_NAME}.manifest.json`));
+      expect(result.manifestPath).toBe(join(SANDBOX_GLOBAL_BASE, `${PACKAGE_NAME}.manifest.json`));
       expect(await exists(result.manifestPath)).toBe(true);
-    } finally {
-      if (originalXdg === undefined) {
-        delete process.env.XDG_CONFIG_HOME;
-      } else {
-        process.env.XDG_CONFIG_HOME = originalXdg;
-      }
-    }
+    });
   });
 });
 

@@ -5,6 +5,16 @@ All notable changes to `opencode-auto-qcgates` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-09-08
+
+### Added
+- **Scope-aware load-time asset management** — The `config` hook restores the OpenCode plugin default of ensuring its own skill/command assets, now scope-aware: a globally-registered plugin manages the global config dir only; a repo-registered plugin (via `.opencode/opencode.json` **or a repo-root `opencode.json`**) manages only that repo; registered in both, both are ensured — each written strictly inside its own config base. Detection is by semantic, `@latest`-aware registration matching (`name` ≡ `name@latest` ≡ `name@x.y.z`), strictly read-only.
+- **One-shot install advisory** — When nothing is registered and nothing is installed in any scope, the load path emits a single non-blocking advisory per session: a warn-level `client.app.log` entry plus a TUI warning toast pointing at `bunx opencode-auto-qcgates install --scope global`. Suppressed whenever any scope holds an install; performs zero writes.
+
+### Changed
+- **Manifest-gated "if necessary" installs at load** — The load path shares the CLI's manifest gating: steady state (manifest present, package version matches the manifest-captured version, per-file sha256 hashes match) is a zero-write no-op; version drift or a missing manifest updates only the detected scope and rewrites its manifest; consumer-modified files are skipped with a warning (force stays CLI-only). The hook still never edits `plugin` arrays, never migrates root configs, and never writes outside its detected scope; all 1.4.0 hardening (unparseable-config refusal, canonical `name@latest` references, semantic dedup, CLI-only migration with consent) is unchanged.
+- **Regression contract expanded** — The approved scenario table (fresh repo / root `opencode.json` / valid local config / unparseable local config / up-to-date control, each × global vs repo-local context, plus both-scopes, version-drift, and steady-state no-op cases, and the advisory one-shot/suppression behavior) is covered end-to-end in `bun test`, with global-context scenarios writing only into a sandboxed `XDG_CONFIG_HOME`.
+
 ## [1.4.0] - 2026-09-07
 
 ### Added
