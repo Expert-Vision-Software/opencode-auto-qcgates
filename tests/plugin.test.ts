@@ -170,6 +170,101 @@ describe("TestBaseliningPlugin", () => {
     });
   });
 
+  test("repo-root registration with a foreign plugin while globally registered: global ensured, root untouched", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      await writeGlobalPluginConfig([PACKAGE_NAME]);
+      const fixtureDir = await makeFixture("global-context-root-foreign");
+      const rootConfigPath = join(fixtureDir, "opencode.json");
+      const rootContent = JSON.stringify(
+        { $schema: "https://opencode.ai/config.json", plugin: ["opencode-architect"] },
+        null,
+        2
+      );
+      await writeFile(rootConfigPath, rootContent);
+      const repoBefore = await snapshotDirectory(fixtureDir);
+
+      await invokeConfigHook(fixtureDir);
+
+      expect(await readFile(rootConfigPath, "utf-8")).toBe(rootContent);
+      expect(await snapshotDirectory(fixtureDir)).toEqual(repoBefore);
+      expect(await exists(join(SANDBOX_GLOBAL_BASE, `${PACKAGE_NAME}.manifest.json`))).toBe(true);
+    });
+  });
+
+  test("repo-local registration with an unparseable nested config: assets ensured, invalid file preserved", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("repo-local-invalid-config");
+      const rootConfigPath = join(fixtureDir, "opencode.json");
+      await writeFile(
+        rootConfigPath,
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: [PACKAGE_NAME] }, null, 2)
+      );
+      const localDir = join(fixtureDir, ".opencode");
+      await mkdir(localDir, { recursive: true });
+      const invalidContent =
+        '{\n  "$schema": "https://opencode.ai/config.json",\n  "plugin": [\n    "opencode-architect"\n  ],\n}';
+      const invalidPath = join(localDir, "opencode.json");
+      await writeFile(invalidPath, invalidContent);
+
+      await invokeConfigHook(fixtureDir);
+
+      expect(await readFile(invalidPath, "utf-8")).toBe(invalidContent);
+      expect(await exists(join(localDir, "skills", "test-baselining", "SKILL.md"))).toBe(true);
+      expect(await exists(join(localDir, `${PACKAGE_NAME}.manifest.json`))).toBe(true);
+    });
+  });
+
+  test("both scopes registered: both ensured with no cross-scope leakage", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      await writeGlobalPluginConfig([PACKAGE_NAME]);
+      const fixtureDir = await makeFixture("both-scopes");
+      const localDir = join(fixtureDir, ".opencode");
+      await mkdir(localDir, { recursive: true });
+      await writeFile(
+        join(localDir, "opencode.json"),
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: [PACKAGE_NAME] }, null, 2)
+      );
+
+      await invokeConfigHook(fixtureDir);
+
+      expect(await exists(join(SANDBOX_GLOBAL_BASE, `${PACKAGE_NAME}.manifest.json`))).toBe(true);
+      expect(await exists(join(SANDBOX_GLOBAL_BASE, "skills", "test-baselining", "SKILL.md"))).toBe(true);
+      expect(await exists(join(localDir, `${PACKAGE_NAME}.manifest.json`))).toBe(true);
+      expect(await exists(join(localDir, "skills", "test-baselining", "SKILL.md"))).toBe(true);
+      const globalConfig = JSON.parse(
+        await readFile(join(SANDBOX_GLOBAL_BASE, "opencode.json"), "utf-8")
+      ) as Record<string, unknown>;
+      expect(globalConfig["plugin"]).toEqual([PACKAGE_NAME]);
+    });
+  });
+
+  test("repo-local version drift: updates the repo scope only, global untouched", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("repo-local-drift");
+      const localDir = join(fixtureDir, ".opencode");
+      await mkdir(localDir, { recursive: true });
+      await writeFile(
+        join(localDir, "opencode.json"),
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: [PACKAGE_NAME] }, null, 2)
+      );
+      await invokeConfigHook(fixtureDir);
+      const manifestPath = join(localDir, `${PACKAGE_NAME}.manifest.json`);
+      const manifest = JSON.parse(await readFile(manifestPath, "utf-8")) as { version: string };
+      manifest.version = "0.0.1";
+      await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+
+      await invokeConfigHook(fixtureDir);
+
+      const rewritten = JSON.parse(await readFile(manifestPath, "utf-8")) as { version: string };
+      expect(rewritten.version).not.toBe("0.0.1");
+      expect(await exists(SANDBOX_GLOBAL_BASE)).toBe(false);
+    });
+  });
+
   test("global context with a valid local config lacking our plugin entry: zero repo writes", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
