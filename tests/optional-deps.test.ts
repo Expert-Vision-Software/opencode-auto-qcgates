@@ -1,7 +1,10 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { join } from "node:path";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import {
   validatePackageManifest,
   mergeOptionalDependencies,
+  loadPackageManifest,
   type PackageManifest,
   type PackageOptionalDep,
   type InstallOptionalDep,
@@ -293,5 +296,68 @@ describe("mergeOptionalDependencies", () => {
     const second = mergeOptionalDependencies(first.dependencies, declared(GRILLING));
     expect(second.dependencies).toEqual(first.dependencies);
     expect(second.changed).toBe(false);
+  });
+});
+
+describe("loadPackageManifest", () => {
+  const PACKAGE_DIR = join(import.meta.dirname, "..");
+  const FIXTURES = join(import.meta.dirname, ".test-optional-deps");
+
+  beforeAll(async () => {
+    await rm(FIXTURES, { recursive: true, force: true });
+    await mkdir(FIXTURES, { recursive: true });
+  });
+
+  afterAll(async () => {
+    await rm(FIXTURES, { recursive: true, force: true });
+  });
+
+  test("loads the shipped assets/manifest.json with grilling as the first entry", async () => {
+    const result = await loadPackageManifest(PACKAGE_DIR);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.manifest.optionalDependencies.length).toBeGreaterThanOrEqual(1);
+      const grilling = result.manifest.optionalDependencies[0];
+      expect(grilling.id).toBe("grilling");
+      expect(grilling.kind).toBe("skill");
+      expect(grilling.source).toEqual({
+        type: "external-skill",
+        repo: "mattpocock/skills",
+        skill: "grilling",
+      });
+      expect(grilling.description.length).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  test("a package dir without a manifest yields an empty dependency list", async () => {
+    const emptyDir = join(FIXTURES, "no-manifest");
+    await mkdir(emptyDir, { recursive: true });
+    const result = await loadPackageManifest(emptyDir);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.manifest.optionalDependencies).toEqual([]);
+    }
+  });
+
+  test("unparseable JSON is a validation failure, not a throw", async () => {
+    const brokenDir = join(FIXTURES, "broken-json");
+    await mkdir(join(brokenDir, "assets"), { recursive: true });
+    await writeFile(join(brokenDir, "assets", "manifest.json"), "{ not json");
+    const result = await loadPackageManifest(brokenDir);
+    expect(result.ok).toBe(false);
+  });
+
+  test("a schema-invalid manifest reports its errors", async () => {
+    const invalidDir = join(FIXTURES, "invalid-schema");
+    await mkdir(join(invalidDir, "assets"), { recursive: true });
+    await writeFile(
+      join(invalidDir, "assets", "manifest.json"),
+      JSON.stringify({ manifestVersion: 2, optionalDependencies: [] })
+    );
+    const result = await loadPackageManifest(invalidDir);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.errors.join("\n")).toContain("manifestVersion");
+    }
   });
 });

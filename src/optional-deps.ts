@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+
 export type OptionalDepKind = "skill" | "agent" | "mcp" | "plugin";
 
 export type OptionalDepState = "pending" | "accepted" | "declined";
@@ -62,6 +65,30 @@ export const EMPTY_PACKAGE_MANIFEST: PackageManifest = {
 
 const KINDS: readonly string[] = ["skill", "agent", "mcp", "plugin"];
 const SOURCE_TYPES: readonly string[] = ["bundled", "external-skill", "npm", "command", "url"];
+
+export const PACKAGE_MANIFEST_RELPATH = join("assets", "manifest.json");
+
+export async function loadPackageManifest(packageDir: string): Promise<PackageManifestValidation> {
+  let raw: string;
+  try {
+    raw = await readFile(join(packageDir, PACKAGE_MANIFEST_RELPATH), "utf-8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return { ok: true, manifest: EMPTY_PACKAGE_MANIFEST };
+    }
+    return { ok: false, errors: [`failed to read ${PACKAGE_MANIFEST_RELPATH}: ${String(error)}`] };
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    return {
+      ok: false,
+      errors: [`${PACKAGE_MANIFEST_RELPATH} is not valid JSON: ${String(error)}`],
+    };
+  }
+  return validatePackageManifest(parsed);
+}
 
 function isBlank(value: string): boolean {
   return value.trim().length === 0;
