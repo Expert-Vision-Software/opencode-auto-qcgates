@@ -5,6 +5,16 @@ All notable changes to `opencode-auto-qcgates` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-09-07
+
+### Added
+- **Per-package sha256 install manifest** — Installs are now gated by `<name>.manifest.json` at the root of the effective opencode config dir (global `~/.config/opencode/` or local `<repo>/.opencode/`), recording the package version plus a per-file sha256 of every installed file. Same version with unchanged hashes is a no-op; consumer-modified files are skipped unless `--force`; a version drift upgrades the install. Replaces the per-skill `.version` markers (stale markers are removed on the first manifest-era install; `status` reads the manifest with a legacy-marker fallback; `uninstall` removes the manifest).
+- **Regression tests for the install contract** — The repro-harness scenarios (fresh repo, root `opencode.json`, valid local config, invalid local JSON, up-to-date control) are ported into `bun test` and assert the config hook produces zero disk writes. Installer tests cover refusal to rewrite unparseable JSON, canonical `name@latest` plugin references with semantic dedup, root-config migration guarding, and manifest no-op / drift / `--force` behavior.
+
+### Changed
+- **Plugin load is purely in-memory** — The `config` hook no longer installs anything and never writes to disk: it sets task-skill permissions and merges existing local config overrides in memory only. A globally-installed plugin is no longer shadowed by an auto-created stale local copy (previously the hook ran a local install on every opencode start, forced anew each time by `.version` marker drift).
+- **Installer hardening** — The installer refuses to rewrite an unparseable `opencode.json`: parse errors abort with a warning and the file is preserved byte-for-byte instead of being rewritten from an empty object. Installer-written plugin references are canonically `name@latest` and deduplicated semantically (`name` ≡ `name@latest` ≡ `name@x.y.z`). Root-config migration is CLI-only via an explicit option, and is refused when either config is unparseable. The CLI verifies it runs from a package with assets present, never a partial cache artifact.
+
 ## [1.3.0] - 2026-08-16
 
 ### Added
