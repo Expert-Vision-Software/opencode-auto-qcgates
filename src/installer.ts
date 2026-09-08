@@ -390,7 +390,15 @@ export async function migrateRootConfig(
   const { needed, rootConfigPath, dotOpenencodeConfigPath, rootConfig, dotOpenencodeConfig } =
     await checkMigrationNeeded(projectDir);
 
-  if (!needed || !rootConfig) {
+  if (!needed) {
+    return false;
+  }
+
+  if (rootConfig === null) {
+    console.warn(
+      `Refusing to migrate ${rootConfigPath}: the file is not valid JSON. ` +
+        `Fix or remove the file, then re-run install. The file was left unchanged.`
+    );
     return false;
   }
 
@@ -456,7 +464,7 @@ export async function install(
     const verdict = await manifest.disposition(configBase, plannedFile.relativeDest, sameVersion, force);
 
     if (verdict === "skip") {
-      skipped.push(plannedFile.relativeDest);
+      skipped.push(manifestEntryPath);
       recordedFiles.push({ path: manifestEntryPath, hash: requiredRecordedHash(manifest, plannedFile.relativeDest) });
       continue;
     }

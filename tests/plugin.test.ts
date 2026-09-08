@@ -109,6 +109,104 @@ describe("TestBaseliningPlugin", () => {
   });
 });
 
+interface ReproScenario {
+  name: string;
+  setup: (dir: string) => Promise<void>;
+}
+
+const REPRO_SCENARIOS: ReproScenario[] = [
+  { name: "A-fresh-repo-no-config", setup: async () => {} },
+  {
+    name: "B-repo-with-root-opencode-json",
+    setup: async dir => {
+      await writeFile(
+        join(dir, "opencode.json"),
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", model: "some/model" }, null, 2)
+      );
+    },
+  },
+  {
+    name: "C-repo-valid-local-config-without-plugin",
+    setup: async dir => {
+      const localDir = join(dir, ".opencode");
+      await mkdir(localDir, { recursive: true });
+      await writeFile(
+        join(localDir, "opencode.json"),
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: ["opencode-architect"] }, null, 2)
+      );
+    },
+  },
+  {
+    name: "D-repo-invalid-local-config-trailing-comma",
+    setup: async dir => {
+      const localDir = join(dir, ".opencode");
+      await mkdir(localDir, { recursive: true });
+      await writeFile(
+        join(localDir, "opencode.json"),
+        '{\n  "$schema": "https://opencode.ai/config.json",\n  "plugin": [\n    "opencode-architect"\n  ],\n}'
+      );
+    },
+  },
+  {
+    name: "E-control-repo-up-to-date-local",
+    setup: async dir => {
+      const skillDir = join(dir, ".opencode", "skills", "test-baselining");
+      await mkdir(skillDir, { recursive: true });
+      await writeFile(join(skillDir, ".version"), "1.3.1");
+      const localDir = join(dir, ".opencode");
+      await writeFile(
+        join(localDir, "opencode.json"),
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: ["opencode-auto-qcgates"] }, null, 2)
+      );
+    },
+  },
+];
+
+describe("config hook repro scenarios ported from qcgates-repro", () => {
+  const scenariosDir = join(import.meta.dirname, ".test-scenarios");
+
+  beforeAll(async () => {
+    await rm(scenariosDir, { recursive: true, force: true });
+    await mkdir(scenariosDir, { recursive: true });
+  });
+
+  afterAll(async () => {
+    await rm(scenariosDir, { recursive: true, force: true });
+  });
+
+  for (const scenario of REPRO_SCENARIOS) {
+    test(`scenario ${scenario.name} produces zero disk writes from the config hook`, async () => {
+      const fixtureDir = join(scenariosDir, scenario.name);
+      await mkdir(fixtureDir, { recursive: true });
+      await scenario.setup(fixtureDir);
+
+      // @ts-ignore - PluginInput requires full context, we only need directory
+      const pluginResult = await plugin({ directory: fixtureDir });
+      const before = await snapshotDirectory(fixtureDir);
+      // @ts-ignore - config returns async function that takes Config argument
+      await (pluginResult.config as ((input: unknown) => Promise<void>) | undefined)?.({});
+      const after = await snapshotDirectory(fixtureDir);
+
+      expect(after).toEqual(before);
+    });
+  }
+
+  test("scenario E control still receives in-memory task skill permissions", async () => {
+    const fixtureDir = join(scenariosDir, "E-control-repo-up-to-date-local");
+    // @ts-ignore - PluginInput requires full context, we only need directory
+    const pluginResult = await plugin({ directory: fixtureDir });
+    const input = {} as Record<string, unknown>;
+    // @ts-ignore - config returns async function that takes Config argument
+    await (pluginResult.config as ((input: unknown) => Promise<void>) | undefined)?.(input);
+
+    const agent = input.agent as Record<string, unknown> | undefined;
+    const task = agent?.task as Record<string, unknown> | undefined;
+    const permission = task?.permission as Record<string, unknown> | undefined;
+    const skillPermissions = permission?.skill as Record<string, string> | undefined;
+    expect(skillPermissions?.["test-baselining"]).toBe("allow");
+  });
+});
+
 describe("detectAurelia", () => {
   const aureliaDir = join(import.meta.dirname, ".test-aurelia");
 
