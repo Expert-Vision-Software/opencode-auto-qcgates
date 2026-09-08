@@ -337,6 +337,101 @@ describe("config hook repro scenarios ported from qcgates-repro", () => {
   });
 });
 
+interface CapturedAdvisory {
+  logs: Array<{ body?: { service?: string; level?: string; message?: string } }>;
+  toasts: Array<{ body?: { title?: string; message?: string; variant?: string; duration?: number } }>;
+}
+
+function makeCapturingClient(): { client: unknown; captured: CapturedAdvisory } {
+  const captured: CapturedAdvisory = { logs: [], toasts: [] };
+  const client = {
+    app: {
+      log: async (input: { body: { service: string; level: string; message: string } }) => {
+        captured.logs.push(input);
+      },
+    },
+    tui: {
+      showToast: async (input: { body: { title: string; message: string; variant: string; duration: number } }) => {
+        captured.toasts.push(input);
+      },
+    },
+  };
+  return { client, captured };
+}
+
+async function invokeConfigHookWithClient(
+  fixtureDir: string,
+  client: unknown,
+  input: Record<string, unknown> = {}
+): Promise<void> {
+  // @ts-ignore - PluginInput requires full context, we only need directory and client
+  const pluginResult = await plugin({ directory: fixtureDir, client });
+  // @ts-ignore - config returns async function that takes Config argument
+  await (pluginResult.config as ((input: unknown) => Promise<void>) | undefined)?.(input);
+}
+
+describe("install advisory (one-shot)", () => {
+  test("nothing installed anywhere: emits exactly one warn log and one warning toast, zero writes", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("advisory-fires");
+      const { client, captured } = makeCapturingClient();
+      const before = await snapshotDirectory(fixtureDir);
+
+      await invokeConfigHookWithClient(fixtureDir, client);
+
+      expect(await snapshotDirectory(fixtureDir)).toEqual(before);
+      expect(captured.logs.length).toBe(1);
+      expect(captured.logs[0]?.body?.service).toBe(PACKAGE_NAME);
+      expect(captured.logs[0]?.body?.level).toBe("warn");
+      expect(captured.logs[0]?.body?.message).toContain("bunx opencode-auto-qcgates install --scope global");
+      expect(captured.toasts.length).toBe(1);
+      expect(captured.toasts[0]?.body?.variant).toBe("warning");
+      expect(captured.toasts[0]?.body?.message).toContain("bunx opencode-auto-qcgates install --scope global");
+    });
+  });
+
+  test("the advisory fires at most once per plugin session", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("advisory-once-per-session");
+      const { client, captured } = makeCapturingClient();
+
+      // @ts-ignore - PluginInput requires full context, we only need directory and client
+      const pluginResult = await plugin({ directory: fixtureDir, client });
+      const config = pluginResult.config as ((input: unknown) => Promise<void>) | undefined;
+      await config?.({});
+      await config?.({});
+      await config?.({});
+
+      expect(captured.logs.length).toBe(1);
+      expect(captured.toasts.length).toBe(1);
+    });
+  });
+
+  test("an installed scope present: no advisory even when the plugin is unregistered", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("advisory-suppressed");
+      const localDir = join(fixtureDir, ".opencode");
+      await mkdir(localDir, { recursive: true });
+      await writeFile(
+        join(localDir, "opencode.json"),
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: ["opencode-architect"] }, null, 2)
+      );
+      await install("local", fixtureDir, { addPluginConfig: false, migrateRootConfig: false, force: false });
+
+      const { client, captured } = makeCapturingClient();
+      const before = await snapshotDirectory(fixtureDir);
+      await invokeConfigHookWithClient(fixtureDir, client);
+
+      expect(captured.logs.length).toBe(0);
+      expect(captured.toasts.length).toBe(0);
+      expect(await snapshotDirectory(fixtureDir)).toEqual(before);
+    });
+  });
+});
+
 describe("detectAurelia", () => {
   const aureliaDir = join(import.meta.dirname, ".test-aurelia");
 
