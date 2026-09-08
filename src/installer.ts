@@ -120,7 +120,7 @@ export function getLocalConfigPath(projectDir: string): string {
   return join(projectDir, ".opencode");
 }
 
-function getPackageDir(): string {
+export function getPackageDir(): string {
   return join(import.meta.dirname, "..");
 }
 
