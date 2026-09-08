@@ -527,6 +527,114 @@ describe("install advisory (one-shot)", () => {
   });
 });
 
+describe("pending optional-deps advisory (one-shot)", () => {
+  async function registerRepoLocal(fixtureDir: string): Promise<void> {
+    const localDir = join(fixtureDir, ".opencode");
+    await mkdir(localDir, { recursive: true });
+    await writeFile(
+      join(localDir, "opencode.json"),
+      JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: [PACKAGE_NAME] }, null, 2)
+    );
+  }
+
+  async function readManifestOptionalDeps(configBase: string): Promise<Array<{ id: string; state: string }>> {
+    const raw = JSON.parse(
+      await readFile(join(configBase, `${PACKAGE_NAME}.manifest.json`), "utf-8")
+    ) as { optionalDependencies: Array<{ id: string; state: string }> | null };
+    return raw.optionalDependencies ?? [];
+  }
+
+  async function setAllManifestStates(configBase: string, state: string): Promise<void> {
+    const manifestPath = join(configBase, `${PACKAGE_NAME}.manifest.json`);
+    const manifest = JSON.parse(await readFile(manifestPath, "utf-8")) as {
+      optionalDependencies: Array<{ id: string; state: string }> | null;
+    };
+    for (const entry of manifest.optionalDependencies ?? []) {
+      entry.state = state;
+    }
+    await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+  }
+
+  test("fresh repo-local install at load: one warn + one toast with the count and the no-args bunx hint", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("pending-advisory-fires");
+      await registerRepoLocal(fixtureDir);
+      const { client, captured } = makeCapturingClient();
+
+      await invokeConfigHookWithClient(fixtureDir, client);
+
+      const deps = await readManifestOptionalDeps(join(fixtureDir, ".opencode"));
+      expect(deps.some(entry => entry.id === "grilling" && entry.state === "pending")).toBe(true);
+
+      expect(captured.toasts.length).toBe(1);
+      const toastMessage = captured.toasts[0]?.body?.message ?? "";
+      expect(toastMessage).toContain("1 optional dependency");
+      expect(toastMessage).toContain("grilling");
+      expect(toastMessage).toContain("bunx opencode-auto-qcgates");
+      expect(toastMessage).not.toContain("install --scope");
+      expect(captured.toasts[0]?.body?.variant).toBe("warning");
+
+      expect(captured.logs.length).toBe(1);
+      expect(captured.logs[0]?.body?.level).toBe("warn");
+      expect(captured.logs[0]?.body?.message).toBe(toastMessage);
+    });
+  });
+
+  test("the pending advisory fires at most once per plugin session", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("pending-advisory-once");
+      await registerRepoLocal(fixtureDir);
+      const { client, captured } = makeCapturingClient();
+
+      // @ts-ignore - PluginInput requires full context, we only need directory and client
+      const pluginResult = await plugin({ directory: fixtureDir, client });
+      const config = pluginResult.config as ((input: unknown) => Promise<void>) | undefined;
+      await config?.({});
+      await config?.({});
+      await config?.({});
+
+      expect(captured.toasts.length).toBe(1);
+      expect(captured.logs.length).toBe(1);
+    });
+  });
+
+  test("all optional deps accepted: no advisory and zero writes on load", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("pending-advisory-silent");
+      await registerRepoLocal(fixtureDir);
+      await invokeConfigHookWithClient(fixtureDir, makeCapturingClient().client);
+      await setAllManifestStates(join(fixtureDir, ".opencode"), "accepted");
+
+      const { client, captured } = makeCapturingClient();
+      const before = await snapshotDirectory(fixtureDir);
+      await invokeConfigHookWithClient(fixtureDir, client);
+      const after = await snapshotDirectory(fixtureDir);
+
+      expect(after).toEqual(before);
+      expect(captured.toasts.length).toBe(0);
+      expect(captured.logs.length).toBe(0);
+    });
+  });
+
+  test("coexists with the nothing-installed advisory: only one toast when nothing is installed", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("pending-advisory-coexists");
+      const { client, captured } = makeCapturingClient();
+
+      await invokeConfigHookWithClient(fixtureDir, client);
+
+      expect(captured.toasts.length).toBe(1);
+      const toastMessage = captured.toasts[0]?.body?.message ?? "";
+      expect(toastMessage).toContain("install --scope global");
+      expect(toastMessage).not.toContain("interactive menu");
+    });
+  });
+});
+
 describe("detectAurelia", () => {
   const aureliaDir = join(import.meta.dirname, ".test-aurelia");
 

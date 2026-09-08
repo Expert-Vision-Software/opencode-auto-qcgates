@@ -1,6 +1,7 @@
 import type { Plugin, Config, PluginInput } from "@opencode-ai/plugin";
 import { install, readLocalConfig, mergeConfigWithOverrides, type Scope, type InstallResult } from "./src/installer.ts";
 import { RegistrationDetector } from "./src/registration.ts";
+import { findPendingOptionalDeps } from "./src/load-advisory.ts";
 
 const PLUGIN_SERVICE_NAME = "opencode-auto-qcgates";
 const ADVISORY_TOAST_DURATION_MS = 10000;
@@ -74,6 +75,35 @@ async function maybeEmitInstallAdvisory(state: AdvisoryState, client: PluginClie
   await showToastAdvisory(client, INSTALL_ADVISORY_MESSAGE);
 }
 
+function pendingDepsAdvisoryMessage(count: number, ids: string[]): string {
+  const noun = count === 1 ? "optional dependency" : "optional dependencies";
+  const verb = count === 1 ? "is" : "are";
+  const pronoun = count === 1 ? "it" : "them";
+  return (
+    `${PLUGIN_SERVICE_NAME}: ${count} ${noun} (${ids.join(", ")}) ${verb} available but pending your decision. ` +
+    `Run "bunx ${PLUGIN_SERVICE_NAME}" (no arguments) to review ${pronoun} in the interactive menu. ` +
+    `Nothing was installed or changed.`
+  );
+}
+
+async function maybeEmitPendingDepsAdvisory(
+  state: AdvisoryState,
+  client: PluginClient,
+  directory: string
+): Promise<void> {
+  if (state.emitted) {
+    return;
+  }
+  const { count, ids } = await findPendingOptionalDeps(directory);
+  if (count === 0) {
+    return;
+  }
+  state.emitted = true;
+  const message = pendingDepsAdvisoryMessage(count, ids);
+  await logWarn(client, message);
+  await showToastAdvisory(client, message);
+}
+
 async function reportLoadSkippedFiles(client: PluginClient, result: InstallResult): Promise<void> {
   for (const skippedPath of result.skipped) {
     await logWarn(
@@ -108,6 +138,8 @@ const plugin: Plugin = async ({ directory, client }) => {
       for (const scope of scopes) {
         await ensureScopeAssets(client, scope, directory);
       }
+
+      await maybeEmitPendingDepsAdvisory(advisoryState, client, directory);
     },
   };
 };
