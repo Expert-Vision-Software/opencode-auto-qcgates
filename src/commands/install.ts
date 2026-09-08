@@ -110,7 +110,6 @@ export async function installCommand(options: InstallCommandOptions): Promise<vo
         configPath: result.configPath,
         manifestPath: result.manifestPath,
         packageDir: join(import.meta.dirname, "..", ".."),
-        packageName,
       },
       manifest.optionalDependencies
     );

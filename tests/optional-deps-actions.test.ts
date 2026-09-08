@@ -1,5 +1,6 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import {
@@ -17,7 +18,6 @@ const BASE_CTX: OptionalDepsContext = {
   configPath: "",
   manifestPath: "",
   packageDir: "",
-  packageName: "opencode-auto-qcgates",
 };
 
 function bundledSkillDep(): PackageOptionalDep {
@@ -65,12 +65,15 @@ function mcpUrlDep(): PackageOptionalDep {
   };
 }
 
-function recordingExecutor(code = 0): { exec: CommandExecutor; calls: Array<{ command: string; args: string[] }> } {
-  const calls: Array<{ command: string; args: string[] }> = [];
+function recordingExecutor(code = 0): {
+  exec: CommandExecutor;
+  calls: Array<{ command: string; args: string[]; cwd?: string }>;
+} {
+  const calls: Array<{ command: string; args: string[]; cwd?: string }> = [];
   return {
     calls,
-    exec: async (command, args) => {
-      calls.push({ command, args });
+    exec: async (command, args, options) => {
+      calls.push({ command, args, cwd: options?.cwd });
       return code;
     },
   };
@@ -95,7 +98,6 @@ async function makeFixture(name: string): Promise<OptionalDepsContext> {
     configPath: join(configBase, "opencode.json"),
     manifestPath: join(configBase, "opencode-auto-qcgates.manifest.json"),
     packageDir,
-    packageName: "opencode-auto-qcgates",
   };
 }
 
@@ -195,6 +197,25 @@ describe("applyOptionalDep: external-skill", () => {
 
     expect(result.ok).toBe(false);
     expect(calls).toHaveLength(1);
+  });
+
+  test("local scope anchors the installer command to the project directory", async () => {
+    const ctx = await makeFixture("external-skill-local");
+    const { exec, calls } = recordingExecutor(0);
+
+    await applyOptionalDep(externalSkillDep(), ctx, exec);
+
+    expect(calls[0].cwd).toBe(dirname(ctx.configBase));
+  });
+
+  test("global scope anchors the installer command to the home directory", async () => {
+    const ctx = await makeFixture("external-skill-global");
+    ctx.scope = "global";
+    const { exec, calls } = recordingExecutor(0);
+
+    await applyOptionalDep(externalSkillDep(), ctx, exec);
+
+    expect(calls[0].cwd).toBe(homedir());
   });
 });
 

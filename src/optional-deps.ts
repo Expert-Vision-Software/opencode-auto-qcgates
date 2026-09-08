@@ -182,21 +182,21 @@ export function isValidOptionalDepEntry(value: unknown): value is PackageOptiona
   return errors.length === 0;
 }
 
-function canonical(value: unknown): string {
+export function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) {
-    return `[${value.map(entry => canonical(entry)).join(",")}]`;
+    return `[${value.map(entry => canonicalJson(entry)).join(",")}]`;
   }
   if (typeof value === "object" && value !== null) {
     const entries = Object.keys(value)
       .sort()
-      .map(key => `${JSON.stringify(key)}:${canonical((value as Record<string, unknown>)[key])}`);
+      .map(key => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`);
     return `{${entries.join(",")}}`;
   }
   return JSON.stringify(value);
 }
 
 function sameDeclaration(a: PackageOptionalDep, b: PackageOptionalDep): boolean {
-  return a.kind === b.kind && canonical(a.source) === canonical(b.source);
+  return a.kind === b.kind && canonicalJson(a.source) === canonicalJson(b.source);
 }
 
 export interface OptionalDepMergeResult {
@@ -231,6 +231,6 @@ export function mergeOptionalDependencies(
 
   return {
     dependencies: merged,
-    changed: canonical(merged) !== canonical(prior),
+    changed: canonicalJson(merged) !== canonicalJson(prior),
   };
 }

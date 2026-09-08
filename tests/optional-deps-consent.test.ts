@@ -51,7 +51,6 @@ async function makeFixture(
     configPath: join(configBase, "opencode.json"),
     manifestPath,
     packageDir,
-    packageName: "opencode-auto-qcgates",
   };
 }
 

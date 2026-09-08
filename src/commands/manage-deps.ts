@@ -2,12 +2,12 @@ import { select } from "@inquirer/prompts";
 import { join } from "node:path";
 import { getGlobalConfigPath, getLocalConfigPath, type Scope } from "../installer.ts";
 import { InstallManifest } from "../manifest.ts";
+import { applyOptionalDepDecisions, type CommandExecutor } from "../optional-deps-actions.ts";
 import {
-  applyOptionalDepDecisions,
   isInteractiveStdio,
   printDepRunResult,
-  type CommandExecutor,
-} from "../optional-deps-actions.ts";
+  selectManageableOptionalDeps,
+} from "../prompts.ts";
 import type { InstallOptionalDep } from "../optional-deps.ts";
 
 export interface ManageDepsOptions {
@@ -20,18 +20,6 @@ export interface ManageDepsOptions {
 
 export function formatOptionalDepStates(deps: InstallOptionalDep[]): string[] {
   return deps.map(dep => `  ${dep.id} (${dep.kind}): ${dep.state}`);
-}
-
-export async function selectManageableOptionalDeps(deps: InstallOptionalDep[]): Promise<string[]> {
-  const { checkbox } = await import("@inquirer/prompts");
-  return checkbox({
-    message: "Manage optional dependencies — check to accept/apply, leave unchecked to decline:",
-    choices: deps.map(dep => ({
-      name: `${dep.id} (${dep.kind}, ${dep.state}) — ${dep.description}`,
-      value: dep.id,
-      checked: dep.state === "accepted",
-    })),
-  });
 }
 
 async function resolvePackageName(): Promise<string> {
@@ -92,7 +80,6 @@ export async function manageDepsCommand(options: ManageDepsOptions): Promise<voi
       configPath: join(configBase, "opencode.json"),
       manifestPath,
       packageDir: join(import.meta.dirname, "..", ".."),
-      packageName,
     },
     deps,
     acceptedIds,

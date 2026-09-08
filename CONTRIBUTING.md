@@ -58,13 +58,16 @@ opencode-auto-qcgates/
 │       └── regression-checking/
 │           └── SKILL.md
 ├── src/
-│   ├── cli.ts                # CLI entry: install / uninstall / status
+│   ├── cli.ts                # CLI entry: install / uninstall / status / manage-deps; interactive menu on bare invocation
 │   ├── commands/
 │   │   ├── install.ts
 │   │   ├── uninstall.ts
-│   │   └── status.ts
+│   │   ├── status.ts
+│   │   └── manage-deps.ts    # Optional-deps review (accept/decline, revisit declined)
 │   ├── installer.ts          # install/uninstall/status with ScopeResolver
-│   └── prompts.ts           # Interactive prompts
+│   ├── optional-deps.ts      # Optional-deps schema, validation, manifest merge
+│   ├── optional-deps-actions.ts # Per-kind installer actions + consent decisions recorder
+│   └── prompts.ts           # Interactive prompts and TTY detection
 ├── tests/
 │   └── plugin.test.ts
 ├── .gitignore

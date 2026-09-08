@@ -5,7 +5,7 @@ import { installCommand } from "./commands/install.ts";
 import { uninstallCommand } from "./commands/uninstall.ts";
 import { statusCommand } from "./commands/status.ts";
 import { manageDepsCommand } from "./commands/manage-deps.ts";
-import { isInteractiveStdio } from "./optional-deps-actions.ts";
+import { isInteractiveStdio } from "./prompts.ts";
 import type { Scope } from "./installer.ts";
 
 const pkg = JSON.parse(

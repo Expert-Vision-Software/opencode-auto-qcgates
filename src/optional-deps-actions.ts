@@ -1,11 +1,20 @@
 import { copyFile, exists, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { PluginNameNormalizer } from "./plugin-name.ts";
 import { InstallManifest, type ManifestFileEntry } from "./manifest.ts";
-import type { InstallOptionalDep, PackageOptionalDep } from "./optional-deps.ts";
+import { canonicalJson } from "./optional-deps.ts";
+import {
+  isInteractiveStdio,
+  printDepRunResult,
+  selectPendingOptionalDeps,
+} from "./prompts.ts";
+import type { BundledSource, ExternalSkillSource, InstallOptionalDep, NpmSource, PackageOptionalDep } from "./optional-deps.ts";
 import type { Scope } from "./installer.ts";
 
-export type CommandExecutor = (command: string, args: string[]) => Promise<number>;
+export type ExecutorOptions = { cwd?: string };
+
+export type CommandExecutor = (command: string, args: string[], options?: ExecutorOptions) => Promise<number>;
 
 export interface OptionalDepsContext {
   scope: Scope;
@@ -13,7 +22,6 @@ export interface OptionalDepsContext {
   configPath: string;
   manifestPath: string;
   packageDir: string;
-  packageName: string;
 }
 
 export interface DepApplyResult {
@@ -30,12 +38,17 @@ export function failResult(message: string): DepApplyResult {
   return { ok: false, message, files: [] };
 }
 
-export async function defaultCommandExecutor(command: string, args: string[]): Promise<number> {
+export async function defaultCommandExecutor(
+  command: string,
+  args: string[],
+  options?: ExecutorOptions
+): Promise<number> {
   const { spawn } = await import("node:child_process");
   return new Promise<number>((resolve, reject) => {
     const child = spawn(command, args, {
       stdio: "inherit",
       shell: process.platform === "win32",
+      cwd: options?.cwd,
     });
     child.on("error", reject);
     child.on("close", code => resolve(code ?? 1));
@@ -89,14 +102,22 @@ function toManifestPath(absolutePath: string, configBase: string): string {
   return relative(configBase, absolutePath).replaceAll("\\", "/");
 }
 
-async function installBundledAsset(dep: PackageOptionalDep, ctx: OptionalDepsContext): Promise<DepApplyResult> {
+function externalSkillWorkingDir(ctx: OptionalDepsContext): string {
+  return ctx.scope === "global" ? homedir() : dirname(ctx.configBase);
+}
+
+async function installBundledAsset(
+  dep: PackageOptionalDep,
+  source: BundledSource,
+  ctx: OptionalDepsContext
+): Promise<DepApplyResult> {
   const group = dep.kind === "skill" ? "skills" : dep.kind === "agent" ? "agents" : null;
   if (group === null) {
     return failResult(`bundled sources only support the "skill" and "agent" kinds, not "${dep.kind}"`);
   }
-  const sourceRoot = join(ctx.packageDir, dep.source.type === "bundled" ? dep.source.path : "");
+  const sourceRoot = join(ctx.packageDir, source.path);
   if (!(await exists(sourceRoot))) {
-    return failResult(`bundled source not found in package: ${dep.source.type === "bundled" ? dep.source.path : ""}`);
+    return failResult(`bundled source not found in package: ${source.path}`);
   }
   const destRoot = join(ctx.configBase, group, dep.id);
   const copied = await copyTree(sourceRoot, destRoot);
@@ -114,57 +135,34 @@ async function installBundledAsset(dep: PackageOptionalDep, ctx: OptionalDepsCon
 
 async function installExternalSkill(
   dep: PackageOptionalDep,
+  source: ExternalSkillSource,
   ctx: OptionalDepsContext,
   exec: CommandExecutor
 ): Promise<DepApplyResult> {
-  if (dep.source.type !== "external-skill") {
-    return failResult(`expected an external-skill source`);
-  }
-  const code = await exec("npx", [
-    "-y",
-    "skills",
-    "add",
-    dep.source.repo,
-    "--skill",
-    dep.source.skill,
-    "-a",
-    "universal",
-  ]);
+  const code = await exec(
+    "npx",
+    ["-y", "skills", "add", source.repo, "--skill", source.skill, "-a", "universal"],
+    { cwd: externalSkillWorkingDir(ctx) }
+  );
   if (code !== 0) {
     return failResult(`skill installer exited with code ${code}`);
   }
-  return okResult(`Installed external skill \`${dep.source.skill}\` from github.com/${dep.source.repo}`);
+  return okResult(`Installed external skill \`${source.skill}\` from github.com/${source.repo}`);
 }
 
-async function addPluginEntry(dep: PackageOptionalDep, ctx: OptionalDepsContext): Promise<DepApplyResult> {
-  if (dep.source.type !== "npm") {
-    return failResult(`expected an npm source`);
-  }
+async function addPluginEntry(source: NpmSource, ctx: OptionalDepsContext): Promise<DepApplyResult> {
   const config = await readJsonConfig(ctx.configPath);
   if (config === null) {
     return failResult(`refusing to edit ${ctx.configPath}: the file is not valid JSON`);
   }
   const existing = Array.isArray(config["plugin"]) ? (config["plugin"] as unknown[]).map(String) : [];
-  if (existing.some(entry => PluginNameNormalizer.matches(entry, dep.source.type === "npm" ? dep.source.package : ""))) {
-    return okResult(`Plugin \`${dep.id}\` already present in config`);
+  if (existing.some(entry => PluginNameNormalizer.matches(entry, source.package))) {
+    return okResult(`Plugin \`${source.package}\` already present in config`);
   }
-  const ref = PluginNameNormalizer.canonicalize(dep.source.package);
+  const ref = PluginNameNormalizer.canonicalize(source.package);
   config["plugin"] = [...existing, ref];
   await writeJsonConfig(ctx.configPath, config);
   return okResult(`Added plugin \`${ref}\` to config`);
-}
-
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(canonicalJson).join(",")}]`;
-  }
-  if (typeof value === "object" && value !== null) {
-    const entries = Object.keys(value)
-      .sort()
-      .map(key => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`);
-    return `{${entries.join(",")}}`;
-  }
-  return JSON.stringify(value);
 }
 
 async function addMcpEntry(dep: PackageOptionalDep, ctx: OptionalDepsContext): Promise<DepApplyResult> {
@@ -202,19 +200,20 @@ export async function applyOptionalDep(
   ctx: OptionalDepsContext,
   exec: CommandExecutor = defaultCommandExecutor
 ): Promise<DepApplyResult> {
-  if (dep.source.type === "bundled") {
-    return installBundledAsset(dep, ctx);
+  const source = dep.source;
+  if (source.type === "bundled") {
+    return installBundledAsset(dep, source, ctx);
   }
-  if (dep.source.type === "external-skill") {
-    return installExternalSkill(dep, ctx, exec);
+  if (source.type === "external-skill") {
+    return installExternalSkill(dep, source, ctx, exec);
   }
-  if (dep.kind === "plugin" && dep.source.type === "npm") {
-    return addPluginEntry(dep, ctx);
+  if (dep.kind === "plugin" && source.type === "npm") {
+    return addPluginEntry(source, ctx);
   }
   if (dep.kind === "mcp") {
     return addMcpEntry(dep, ctx);
   }
-  return failResult(`no installer action for kind "${dep.kind}" with source type "${dep.source.type}"`);
+  return failResult(`no installer action for kind "${dep.kind}" with source type "${source.type}"`);
 }
 
 export interface DepRunResult {
@@ -225,15 +224,16 @@ export interface DepRunResult {
 }
 
 function sameDeps(a: InstallOptionalDep[], b: InstallOptionalDep[]): boolean {
-  if (a.length !== b.length) {
-    return false;
-  }
-  return a.every((entry, index) =>
-    entry.id === b[index].id &&
-    entry.kind === b[index].kind &&
-    entry.description === b[index].description &&
-    entry.state === b[index].state &&
-    canonicalJson(entry.source) === canonicalJson(b[index].source)
+  return (
+    a.length === b.length &&
+    a.every(
+      (entry, index) =>
+        entry.id === b[index].id &&
+        entry.kind === b[index].kind &&
+        entry.description === b[index].description &&
+        entry.state === b[index].state &&
+        canonicalJson(entry.source) === canonicalJson(b[index].source)
+    )
   );
 }
 
@@ -293,34 +293,6 @@ export async function applyOptionalDepDecisions(
   return { applied, declined, failed, changed };
 }
 
-export function isInteractiveStdio(): boolean {
-  return process.stdin.isTTY === true && process.stdout.isTTY === true;
-}
-
-export async function selectPendingOptionalDeps(pending: InstallOptionalDep[]): Promise<string[]> {
-  const { checkbox } = await import("@inquirer/prompts");
-  return checkbox({
-    message: "Optional dependencies — check to accept, leave unchecked to decline:",
-    choices: pending.map(dep => ({
-      name: `${dep.id} (${dep.kind}) — ${dep.description}`,
-      value: dep.id,
-      checked: false,
-    })),
-  });
-}
-
-export function printDepRunResult(result: DepRunResult): void {
-  for (const entry of result.applied) {
-    console.log(`  ${entry.message}`);
-  }
-  if (result.declined.length > 0) {
-    console.log(`  Declined (recorded): ${result.declined.join(", ")}`);
-  }
-  for (const failure of result.failed) {
-    console.warn(`  Failed: ${failure.id} — ${failure.reason}`);
-  }
-}
-
 export interface ConsentOptions {
   interactive?: boolean;
   select?: (pending: InstallOptionalDep[]) => Promise<string[]>;
@@ -350,4 +322,4 @@ export async function runOptionalDepsConsent(
   const result = await applyOptionalDepDecisions(ctx, deps, acceptedIds, options.exec);
   printDepRunResult(result);
   return result;
-};
+}
