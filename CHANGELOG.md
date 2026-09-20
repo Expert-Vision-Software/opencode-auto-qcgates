@@ -5,6 +5,19 @@ All notable changes to `opencode-auto-qcgates` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-09-20
+
+### Added
+- **Format-tolerant registration detection** — Plugin registration is now detected in `opencode.jsonc` as well as `opencode.json`, across all three locations (global config dir, `.opencode/opencode.json{,c}`, and a repo-root `opencode.json{,c}`). `.jsonc` files are parsed leniently — `//` and `/* */` comments and trailing commas are stripped with a string-aware scanner, so `$schema` URLs and other `//`-bearing string values survive — while `.json` keeps strict parsing and all existing byte-for-byte / refuse-to-write guarantees.
+
+- **Startup failure advisories with cache-rot remediation** — When the `config` hook's self-ensure path fails, the plugin degrades to a warn-level log plus a TUI warning toast naming the exact remediation: the `bunx opencode-auto-qcgates install --scope global` command and the `~/.cache/opencode/packages/<name>@<version>` directory to clear so the next start re-installs a fresh copy. The advisory builder itself is infallible (static fallback text when even package metadata is unreadable), and the hook never auto-deletes the cache (it would race in-flight installs). The CLI-side assets-missing error (`assetsMissingError`) carries the same two remedies.
+
+### Changed
+- **Never throw from hooks (ADR 0007)** — The entire `config` hook body is wrapped in try/catch: any failure degrades to the advisory path above and startup proceeds. In-memory work that already ran (task-skill permissions, local-override merge) is preserved. Hard errors remain CLI-only. Rationale and rejected alternatives recorded in `docs/adr/0007-startup-non-interference-never-throw-from-hooks.md`; the upstream OpenCode behavior (no timeout on plugin hook joins, permanent partial cache reuse) is drafted in `docs/upstream/opencode-plugin-config-hook-startup-hang.md` (not yet filed).
+
+### Documentation
+- `CONTEXT.md` gains a Delivery section: **Registration**, **Self-Ensure**, and **Cache Rot**. `AGENTS.md` gains the hooks-never-throw convention bullet.
+
 ## [1.5.0] - 2026-09-08
 
 ### Added
