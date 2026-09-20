@@ -109,6 +109,59 @@ describe("RegistrationDetector.detect", () => {
     });
   });
 
+  test("returns global for a global opencode.jsonc registration", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      await mkdir(SANDBOX_GLOBAL_BASE, { recursive: true });
+      await writeFile(
+        join(SANDBOX_GLOBAL_BASE, "opencode.jsonc"),
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: [PACKAGE_NAME] }, null, 2)
+      );
+      const fixtureDir = await makeFixture("global-jsonc");
+      await expectContext(fixtureDir, "global");
+    });
+  });
+
+  test("returns repo-local for a repo-root opencode.jsonc registration", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("repo-root-jsonc");
+      await writeFile(
+        join(fixtureDir, "opencode.jsonc"),
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: [PACKAGE_NAME] }, null, 2)
+      );
+      await expectContext(fixtureDir, "repo-local");
+    });
+  });
+
+  test("returns repo-local for a nested .opencode/opencode.jsonc registration", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("repo-nested-jsonc");
+      const localDir = join(fixtureDir, ".opencode");
+      await mkdir(localDir, { recursive: true });
+      await writeFile(
+        join(localDir, "opencode.jsonc"),
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: [PACKAGE_NAME] }, null, 2)
+      );
+      await expectContext(fixtureDir, "repo-local");
+    });
+  });
+
+  test("returns both when global jsonc and nested json register the package", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      await mkdir(SANDBOX_GLOBAL_BASE, { recursive: true });
+      await writeFile(
+        join(SANDBOX_GLOBAL_BASE, "opencode.jsonc"),
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: [PACKAGE_NAME] }, null, 2)
+      );
+      const fixtureDir = await makeFixture("both-jsonc-global");
+      await writeNestedRepoConfig(fixtureDir, [PACKAGE_NAME]);
+      await expectContext(fixtureDir, "both");
+    });
+  });
+
   test("detection performs zero disk writes", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();

@@ -88,6 +88,20 @@ _Avoid_: helper file, side doc, appendix
 A non-blocking advisory message the installer (`src/installer.ts`) surfaces after a successful install — never modifies the consumer config autonomously. The current trigger is Aurelia detection (suggests `aurelia-expert`); future triggers append to the same `InstallResult.recommendations` channel.
 _Avoid_: install hint, banner, tip
 
+### Delivery
+
+**Registration**:
+The consumer's act of listing the package in an opencode config's `plugin` array — global or project-scoped. Registration is what triggers the plugin; it is distinct from installation.
+_Avoid_: plugin entry, activation
+
+**Self-Ensure**:
+The plugin's on-load behavior of copying its Skill Assets into the config dir of each scope where it is registered, so config-entry installs need no separate installer run.
+_Avoid_: auto-install, sync, bootstrap
+
+**Cache Rot**:
+A partial or stale extraction of the package under OpenCode's plugin cache that lacks bundled assets, breaking Self-Ensure until the consumer clears the cached copy.
+_Avoid_: corrupt install, broken cache
+
 ### Commands
 
 **Command Argument**:

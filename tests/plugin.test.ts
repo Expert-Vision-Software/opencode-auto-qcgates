@@ -111,6 +111,86 @@ describe("TestBaseliningPlugin", () => {
     });
   });
 
+  test("global registration via opencode.jsonc: writes land only under the global config dir, repo untouched", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      await mkdir(SANDBOX_GLOBAL_BASE, { recursive: true });
+      const jsoncContent = [
+        "{",
+        "  // pinned globally so every project gets the quality gates",
+        '  "$schema": "https://opencode.ai/config.json",',
+        '  "model": "some/model",',
+        '  "plugin": [',
+        `    "${PACKAGE_NAME}@1.5.0",`,
+        "  ],",
+        "}",
+      ].join("\n");
+      await writeFile(join(SANDBOX_GLOBAL_BASE, "opencode.jsonc"), jsoncContent);
+      const fixtureDir = await makeFixture("global-jsonc-context-fresh");
+      const repoBefore = await snapshotDirectory(fixtureDir);
+
+      await invokeConfigHook(fixtureDir);
+
+      expect(await readFile(join(SANDBOX_GLOBAL_BASE, "opencode.jsonc"), "utf-8")).toBe(jsoncContent);
+      expect(await exists(join(SANDBOX_GLOBAL_BASE, "opencode.json"))).toBe(false);
+      expect(await snapshotDirectory(fixtureDir)).toEqual(repoBefore);
+      expect(await exists(join(SANDBOX_GLOBAL_BASE, `${PACKAGE_NAME}.manifest.json`))).toBe(true);
+      expect(await exists(join(SANDBOX_GLOBAL_BASE, "skills", "test-baselining", "SKILL.md"))).toBe(true);
+      expect(await exists(join(SANDBOX_GLOBAL_BASE, "commands", "test-baseline.md"))).toBe(true);
+    });
+  });
+
+  test("repo-local registration via .opencode/opencode.jsonc: assets ensured, jsonc file preserved byte-for-byte", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("repo-local-jsonc-ensure");
+      const localDir = join(fixtureDir, ".opencode");
+      await mkdir(localDir, { recursive: true });
+      const jsoncContent = JSON.stringify(
+        { $schema: "https://opencode.ai/config.json", model: "some/model", plugin: [PACKAGE_NAME] },
+        null,
+        2
+      );
+      const jsoncPath = join(localDir, "opencode.jsonc");
+      await writeFile(jsoncPath, jsoncContent);
+
+      const input = {} as Record<string, unknown>;
+      await invokeConfigHook(fixtureDir, input);
+
+      expect(await readFile(jsoncPath, "utf-8")).toBe(jsoncContent);
+      expect(await exists(join(localDir, "skills", "test-baselining", "SKILL.md"))).toBe(true);
+      expect(await exists(join(localDir, "commands", "test-baseline.md"))).toBe(true);
+      expect(await exists(join(localDir, `${PACKAGE_NAME}.manifest.json`))).toBe(true);
+      expectSkillPermissions(input);
+    });
+  });
+
+  test("config hook survives an install failure caused by a blocked destination: degrades to a warn log and toast, never rejects", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      await writeGlobalPluginConfig([PACKAGE_NAME]);
+      const fixtureDir = await makeFixture("hook-degrade-install-failure");
+      await mkdir(SANDBOX_GLOBAL_BASE, { recursive: true });
+      await writeFile(join(SANDBOX_GLOBAL_BASE, "skills"), "not a directory");
+      const { client, captured } = makeCapturingClient();
+      const input = {} as Record<string, unknown>;
+
+      await expect(invokeConfigHookWithClient(fixtureDir, client, input)).resolves.toBeUndefined();
+
+      expect(captured.logs.length).toBe(1);
+      expect(captured.logs[0]?.body?.service).toBe(PACKAGE_NAME);
+      expect(captured.logs[0]?.body?.level).toBe("warn");
+      expect(captured.toasts.length).toBe(1);
+      expect(captured.toasts[0]?.body?.variant).toBe("warning");
+      expect(captured.logs[0]?.body?.message).toContain("bunx opencode-auto-qcgates install --scope global");
+      expect(captured.toasts[0]?.body?.message).toContain("bunx opencode-auto-qcgates install --scope global");
+      expect(captured.logs[0]?.body?.message).toContain(
+        `~/.cache/opencode/packages/${PACKAGE_NAME}@`
+      );
+      expectSkillPermissions(input);
+    });
+  });
+
   test("global registration steady state: second load is a zero-write no-op", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();

@@ -124,14 +124,27 @@ function getPackageDir(): string {
   return join(import.meta.dirname, "..");
 }
 
+export function assetsMissingError(
+  assetsSkillsPath: string,
+  packageName: string,
+  packageVersion: string
+): string {
+  const cacheDir = `~/.cache/opencode/packages/${packageName}@${packageVersion}`;
+  return (
+    `Package assets not found at ${assetsSkillsPath}. ` +
+    `Installs must run from the published package (e.g. "bunx ${packageName}@latest install" ` +
+    `or a global install), never from a partial cache artifact. ` +
+    `If OpenCode loaded this copy from its plugin cache, remove the cached copy so the next start ` +
+    `re-installs it, then restart: "rm -rf ${cacheDir}"`
+  );
+}
+
 async function resolvePackageDir(): Promise<string> {
   const packageDir = getPackageDir();
   const assetsSkillsPath = join(packageDir, "assets", "skills");
   if (!(await exists(assetsSkillsPath))) {
     throw new Error(
-      `Package assets not found at ${assetsSkillsPath}. ` +
-        `Installs must run from the published package (e.g. "bunx ${await getPackageName()}@latest install" ` +
-        `or a global install), never from a partial cache artifact.`
+      assetsMissingError(assetsSkillsPath, await getPackageName(), await getPackageVersion())
     );
   }
   return packageDir;
@@ -255,6 +268,65 @@ function writtenCommandFiles(configBase: string, writtenRelativePaths: string[])
     .map(manifestPath => join(configBase, manifestPath));
 }
 
+function stripJsoncSyntax(source: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < source.length; i++) {
+    const char = source[i];
+    if (inString) {
+      out += char;
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inString = true;
+      out += char;
+      continue;
+    }
+    if (char === "/" && source[i + 1] === "/") {
+      while (i < source.length && source[i] !== "\n") {
+        i++;
+      }
+      continue;
+    }
+    if (char === "/" && source[i + 1] === "*") {
+      i += 2;
+      while (i < source.length && !(source[i] === "*" && source[i + 1] === "/")) {
+        i++;
+      }
+      i++;
+      continue;
+    }
+    if (char === ",") {
+      let j = i + 1;
+      while (j < source.length && /\s/.test(source[j])) {
+        j++;
+      }
+      if (source[j] === "}" || source[j] === "]") {
+        continue;
+      }
+    }
+    out += char;
+  }
+  return out;
+}
+
+function parseConfigContent(content: string, path: string): Record<string, unknown> | null {
+  const tolerated = path.endsWith(".jsonc") ? stripJsoncSyntax(content) : content;
+  try {
+    return JSON.parse(tolerated);
+  } catch {
+    return null;
+  }
+}
+
 async function readJsonConfig(path: string): Promise<Record<string, unknown> | null> {
   let content: string;
   try {
@@ -265,11 +337,7 @@ async function readJsonConfig(path: string): Promise<Record<string, unknown> | n
     }
     return null;
   }
-  try {
-    return JSON.parse(content);
-  } catch {
-    return null;
-  }
+  return parseConfigContent(content, path);
 }
 
 async function writeJsonConfig(path: string, config: Record<string, unknown>): Promise<void> {
@@ -348,6 +416,13 @@ export async function isPluginInConfig(configPath: string, packageName: string):
 
   const plugins = config.plugin as string[];
   return plugins.some(entry => PluginNameNormalizer.matches(entry, packageName));
+}
+
+export async function isPluginInConfigBase(configBase: string, packageName: string): Promise<boolean> {
+  if (await isPluginInConfig(join(configBase, "opencode.json"), packageName)) {
+    return true;
+  }
+  return isPluginInConfig(join(configBase, "opencode.jsonc"), packageName);
 }
 
 export async function checkMigrationNeeded(projectDir: string): Promise<{

@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { join } from "node:path";
 import { exists, mkdir, rm, readFile, writeFile } from "node:fs/promises";
-import { install, migrateRootConfig, uninstall } from "../src/installer.ts";
+import { assetsMissingError, install, migrateRootConfig, uninstall } from "../src/installer.ts";
 import { PluginNameNormalizer } from "../src/plugin-name.ts";
 import { snapshotDirectory } from "./snapshot.ts";
 import { SANDBOX_GLOBAL_BASE, resetGlobalConfig, withGlobalSandbox } from "./global-sandbox.ts";
@@ -319,5 +319,19 @@ describe("root config migration guard", () => {
     const migrated = JSON.parse(await readLocalConfigRaw(fixtureDir)) as Record<string, unknown>;
     expect(migrated["model"]).toBe("some/model");
     expect(migrated["plugin"]).toEqual([CANONICAL_PLUGIN_REF]);
+  });
+});
+
+describe("cache-rot error text", () => {
+  test("assetsMissingError names the cache directory and both remedies", () => {
+    const message = assetsMissingError(
+      "/some/cache/node_modules/opencode-auto-qcgates/assets/skills",
+      "opencode-auto-qcgates",
+      "1.5.0"
+    );
+    expect(message).toContain("Package assets not found at");
+    expect(message).toContain("bunx opencode-auto-qcgates@latest install");
+    expect(message).toContain("~/.cache/opencode/packages/opencode-auto-qcgates@1.5.0");
+    expect(message).toMatch(/rm -rf/);
   });
 });

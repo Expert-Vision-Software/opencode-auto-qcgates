@@ -1,9 +1,8 @@
-import { join } from "node:path";
 import {
   getGlobalConfigPath,
   getLocalConfigPath,
   getPackageName,
-  isPluginInConfig,
+  isPluginInConfigBase,
   isScopeInstalled,
   type Scope,
 } from "./installer.ts";
@@ -13,7 +12,7 @@ export type RegistrationContext = "none" | "global" | "repo-local" | "both";
 export class RegistrationDetector {
   static async detect(directory: string): Promise<RegistrationContext> {
     const packageName = await getPackageName();
-    const globalRegistered = await isPluginInConfig(join(getGlobalConfigPath(), "opencode.json"), packageName);
+    const globalRegistered = await isPluginInConfigBase(getGlobalConfigPath(), packageName);
     const repoLocalRegistered = await RegistrationDetector.isRegisteredInRepo(directory, packageName);
 
     if (globalRegistered && repoLocalRegistered) {
@@ -51,11 +50,10 @@ export class RegistrationDetector {
   }
 
   private static async isRegisteredInRepo(directory: string, packageName: string): Promise<boolean> {
-    const nestedConfigPath = join(getLocalConfigPath(directory), "opencode.json");
-    if (await isPluginInConfig(nestedConfigPath, packageName)) {
+    const nestedConfigBase = getLocalConfigPath(directory);
+    if (await isPluginInConfigBase(nestedConfigBase, packageName)) {
       return true;
     }
-    const rootConfigPath = join(directory, "opencode.json");
-    return isPluginInConfig(rootConfigPath, packageName);
+    return isPluginInConfigBase(directory, packageName);
   }
 }

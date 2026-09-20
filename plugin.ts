@@ -1,5 +1,13 @@
 import type { Plugin, Config, PluginInput } from "@opencode-ai/plugin";
-import { install, readLocalConfig, mergeConfigWithOverrides, type Scope, type InstallResult } from "./src/installer.ts";
+import {
+  install,
+  readLocalConfig,
+  mergeConfigWithOverrides,
+  getPackageName,
+  getPackageVersion,
+  type Scope,
+  type InstallResult,
+} from "./src/installer.ts";
 import { RegistrationDetector } from "./src/registration.ts";
 
 const PLUGIN_SERVICE_NAME = "opencode-auto-qcgates";
@@ -89,24 +97,53 @@ async function ensureScopeAssets(client: PluginClient, scope: Scope, directory: 
   return result;
 }
 
+async function buildFailureMessage(error: unknown): Promise<string> {
+  const detail = error instanceof Error ? error.message : String(error);
+  const packageName = await getPackageName();
+  const cacheDir = `~/.cache/opencode/packages/${packageName}@${await getPackageVersion()}`;
+  return (
+    `${PLUGIN_SERVICE_NAME} startup self-ensure failed: ${detail}. Remedies: run ` +
+    `"bunx ${packageName} install --scope global", or, if the OpenCode plugin cache is corrupt, ` +
+    `remove the cached copy and restart: "rm -rf ${cacheDir}".`
+  );
+}
+
+async function emitFailureAdvisory(client: PluginClient, error: unknown): Promise<void> {
+  let message: string;
+  try {
+    message = await buildFailureMessage(error);
+  } catch {
+    message =
+      `${PLUGIN_SERVICE_NAME} startup self-ensure failed and the package metadata is unreadable. ` +
+      `Remedies: run "bunx ${PLUGIN_SERVICE_NAME} install --scope global", or clear the plugin cache ` +
+      `under ~/.cache/opencode/packages/ and restart.`;
+  }
+  await logWarn(client, message);
+  await showToastAdvisory(client, message);
+}
+
 const plugin: Plugin = async ({ directory, client }) => {
   const advisoryState: AdvisoryState = { emitted: false };
 
   return {
     config: async (input: Config) => {
-      setTaskSkillPermissions(input);
-      await mergeExistingLocalOverrides(input as Record<string, unknown>, directory);
+      try {
+        setTaskSkillPermissions(input);
+        await mergeExistingLocalOverrides(input as Record<string, unknown>, directory);
 
-      const context = await RegistrationDetector.detect(directory);
-      const scopes = RegistrationDetector.scopesToEnsure(context);
+        const context = await RegistrationDetector.detect(directory);
+        const scopes = RegistrationDetector.scopesToEnsure(context);
 
-      if (scopes.length === 0) {
-        await maybeEmitInstallAdvisory(advisoryState, client, directory);
-        return;
-      }
+        if (scopes.length === 0) {
+          await maybeEmitInstallAdvisory(advisoryState, client, directory);
+          return;
+        }
 
-      for (const scope of scopes) {
-        await ensureScopeAssets(client, scope, directory);
+        for (const scope of scopes) {
+          await ensureScopeAssets(client, scope, directory);
+        }
+      } catch (error) {
+        await emitFailureAdvisory(client, error);
       }
     },
   };
