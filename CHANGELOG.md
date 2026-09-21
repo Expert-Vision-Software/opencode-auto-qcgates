@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Dependency classification and reproducibility hardening** — `@opencode-ai/plugin` is a type-only import (the sole reference is `import type { Plugin, Config, PluginInput }` in `plugin.ts`; nothing value-imports, dynamically imports, or `require()`s it), so it moves from `dependencies` to `devDependencies` and is no longer installed for consumers. Every floating range (`@opencode-ai/plugin: "*"` and `@types/bun` / `@types/node` / `typescript`: `latest`) is pinned to a caret range at the currently resolved, tested version (`^1.18.31`, `^1.4.2`, `^26.6.2`, `^7.0.2`) with no version bumps. `bun.lock` is now committed (previously gitignored) and CI installs with `bun install --frozen-lockfile`, so a fresh clone and the publish job resolve the exact tested dependency graph.
+
 ### Fixed
 - **`.jsonc` scanner mis-reads a trailing comma separated from its closer by a comment** — The string-aware scanner in `src/installer.ts` decided whether a `,` was trailing by looking ahead past whitespace only, so `{"plugin": ["name", // comment\n]}` stripped the comment but kept the comma, yielding `{"plugin": ["name", ]}`. `JSON.parse` rejected it, the file was treated as unparseable, and registration detection (`isPluginInConfigBase`) silently missed a genuine `opencode.jsonc` registration. The lookahead now skips whitespace, `//` line comments, and `/* */` block comments alike before testing for `}` or `]` (new `skipJsoncTrivia` helper), covering array and object closers. String-awareness and the `.jsonc`-lenient / `.json`-strict split are unchanged, as are byte-for-byte preservation, refuse-to-write-on-unparseable, read-only detection, and the never-throw hook.
 
