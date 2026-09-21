@@ -1,6 +1,6 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, spyOn } from "bun:test";
 import { join } from "node:path";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import { RegistrationDetector, type RegistrationContext } from "../src/registration.ts";
 import { snapshotDirectory } from "./snapshot.ts";
 import { SANDBOX_GLOBAL_BASE, resetGlobalConfig, withGlobalSandbox, writeGlobalPluginConfig } from "./global-sandbox.ts";
@@ -177,7 +177,76 @@ describe("RegistrationDetector.detect", () => {
       expect(await snapshotDirectory(SANDBOX_GLOBAL_BASE)).toEqual(beforeGlobal);
     });
   });
+
+  test("detects a jsonc registration whose line comment sits between the trailing comma and the array closer", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const content = `{\n  "plugin": [\n    "${PACKAGE_NAME}", // trailing comment\n  ]\n}`;
+      const fixtureDir = await makeFixture("jsonc-array-line-comment");
+      const jsoncPath = join(fixtureDir, "opencode.jsonc");
+      await writeFile(jsoncPath, content);
+
+      await expectJsoncRegistration(fixtureDir, jsoncPath, content);
+    });
+  });
+
+  test("detects a jsonc registration whose block comment sits between the trailing comma and the array closer", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const content = `{\n  "plugin": [\n    "${PACKAGE_NAME}", /* trailing comment */\n  ]\n}`;
+      const fixtureDir = await makeFixture("jsonc-array-block-comment");
+      const jsoncPath = join(fixtureDir, "opencode.jsonc");
+      await writeFile(jsoncPath, content);
+
+      await expectJsoncRegistration(fixtureDir, jsoncPath, content);
+    });
+  });
+
+  test("detects a jsonc registration whose comment sits between the trailing comma and the object closer", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const contents = [
+        `{\n  "plugin": ["${PACKAGE_NAME}"], // trailing comment\n}`,
+        `{\n  "plugin": ["${PACKAGE_NAME}"], /* trailing comment */\n}`,
+      ];
+
+      for (const [index, content] of contents.entries()) {
+        const fixtureDir = await makeFixture(`jsonc-object-comment-${index}`);
+        const jsoncPath = join(fixtureDir, "opencode.jsonc");
+        await writeFile(jsoncPath, content);
+
+        await expectJsoncRegistration(fixtureDir, jsoncPath, content);
+      }
+    });
+  });
+
+  test("keeps a comma or line comment inside a string out of the trailing-comma scanner", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const content =
+        `{\n  "plugin": ["${PACKAGE_NAME}"],\n` +
+        `  "note": "escaped quote \\" then // slashes, and a } brace"\n}`;
+      const fixtureDir = await makeFixture("jsonc-string-awareness");
+      const jsoncPath = join(fixtureDir, "opencode.jsonc");
+      await writeFile(jsoncPath, content);
+
+      await expectJsoncRegistration(fixtureDir, jsoncPath, content);
+    });
+  });
 });
+
+async function expectJsoncRegistration(fixtureDir: string, jsoncPath: string, content: string): Promise<void> {
+  const before = await snapshotDirectory(fixtureDir);
+  const warn = spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    expect(await RegistrationDetector.detect(fixtureDir)).toBe("repo-local");
+    expect(warn).not.toHaveBeenCalled();
+    expect(await snapshotDirectory(fixtureDir)).toEqual(before);
+    expect(await readFile(jsoncPath, "utf-8")).toBe(content);
+  } finally {
+    warn.mockRestore();
+  }
+}
 
 describe("RegistrationDetector.scopesToEnsure", () => {
   test("maps each context to its managed scopes", () => {

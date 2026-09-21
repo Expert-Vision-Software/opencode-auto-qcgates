@@ -5,6 +5,11 @@ All notable changes to `opencode-auto-qcgates` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **`.jsonc` scanner mis-reads a trailing comma separated from its closer by a comment** — The string-aware scanner in `src/installer.ts` decided whether a `,` was trailing by looking ahead past whitespace only, so `{"plugin": ["name", // comment\n]}` stripped the comment but kept the comma, yielding `{"plugin": ["name", ]}`. `JSON.parse` rejected it, the file was treated as unparseable, and registration detection (`isPluginInConfigBase`) silently missed a genuine `opencode.jsonc` registration. The lookahead now skips whitespace, `//` line comments, and `/* */` block comments alike before testing for `}` or `]` (new `skipJsoncTrivia` helper), covering array and object closers. String-awareness and the `.jsonc`-lenient / `.json`-strict split are unchanged, as are byte-for-byte preservation, refuse-to-write-on-unparseable, read-only detection, and the never-throw hook.
+
 ## [1.6.0] - 2026-09-20
 
 ### Added

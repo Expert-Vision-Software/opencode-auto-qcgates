@@ -305,17 +305,41 @@ function stripJsoncSyntax(source: string): string {
       continue;
     }
     if (char === ",") {
-      let j = i + 1;
-      while (j < source.length && /\s/.test(source[j])) {
-        j++;
-      }
-      if (source[j] === "}" || source[j] === "]") {
+      const next = skipJsoncTrivia(source, i + 1);
+      if (source[next] === "}" || source[next] === "]") {
         continue;
       }
     }
     out += char;
   }
   return out;
+}
+
+function skipJsoncTrivia(source: string, start: number): number {
+  let index = start;
+  while (index < source.length) {
+    const char = source[index];
+    if (/\s/.test(char)) {
+      index++;
+      continue;
+    }
+    if (char === "/" && source[index + 1] === "/") {
+      while (index < source.length && source[index] !== "\n") {
+        index++;
+      }
+      continue;
+    }
+    if (char === "/" && source[index + 1] === "*") {
+      index += 2;
+      while (index < source.length && !(source[index] === "*" && source[index + 1] === "/")) {
+        index++;
+      }
+      index += 2;
+      continue;
+    }
+    break;
+  }
+  return index;
 }
 
 function parseConfigContent(content: string, path: string): Record<string, unknown> | null {
