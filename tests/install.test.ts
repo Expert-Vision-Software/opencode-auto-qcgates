@@ -399,6 +399,27 @@ describe("loud bundled-asset absence", () => {
       await resolvePackageDir(PACKAGE_NAME, "1.6.0", "/cache/packages", packageDir)
     ).toBe(packageDir);
   });
+
+  test("install rejects with BundledAssetsMissingError when the resolved package dir lacks assets", async () => {
+    const fixtureDir = await makeFixture("install-missing-assets");
+    const packageDir = join(TEST_DIR, "install-package-without-assets");
+    await rm(packageDir, { recursive: true, force: true });
+    await mkdir(packageDir, { recursive: true });
+
+    const error = (await install(
+      "local",
+      fixtureDir,
+      INSTALL_OPTIONS,
+      null,
+      false,
+      packageDir
+    ).catch((caught: unknown) => caught)) as BundledAssetsMissingError;
+
+    expect(error).toBeInstanceOf(BundledAssetsMissingError);
+    expect(error.message).toContain(join(packageDir, "assets", "skills"));
+    expect(error.message).toContain(PACKAGE_NAME);
+    expect(await exists(join(fixtureDir, ".opencode", `${PACKAGE_NAME}.manifest.json`))).toBe(false);
+  });
 });
 
 describe("content declaration and mode resolution", () => {

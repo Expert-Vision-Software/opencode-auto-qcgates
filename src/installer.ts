@@ -536,7 +536,8 @@ export async function install(
   projectDir: string = process.cwd(),
   options: InstallOptions,
   requestedMode: InstallMode | null = null,
-  pruneCache: boolean = true
+  pruneCache: boolean = true,
+  packageDir: string = getPackageDir()
 ): Promise<InstallResult> {
   const packageName = await getPackageName();
   const packageVersion = await getPackageVersion();
@@ -547,7 +548,7 @@ export async function install(
     : noCacheOutcome();
 
   const mode = await resolveMode(requestedMode);
-  const pkgDir = await resolvePackageDir(packageName, packageVersion, cacheRoot);
+  const pkgDir = await resolvePackageDir(packageName, packageVersion, cacheRoot, packageDir);
 
   const { addPluginConfig, migrateRootConfig: allowRootMigration, force } = options;
 
@@ -661,7 +662,7 @@ export async function install(
   }
 
   const aureliaCheck = await detectAurelia(projectDir);
-  const optionalSkillRecs = await detectOptionalSkills(configBase);
+  const optionalSkillRecs = await detectOptionalSkills(configBase, pkgDir);
   const recommendations: string[] = [];
   if (aureliaCheck.detected) {
     recommendations.push(aureliaCheck.message);

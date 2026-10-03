@@ -28,6 +28,7 @@ Options:
   -s, --scope <scope>    Installation scope: "local" or "global"
   -m, --mode <mode>      Install mode: "plugin" or "copy"
   -f, --force            Skip confirmation prompts
+      --migrate          Consent to move a repo-root opencode.json into .opencode/
   -h, --help             Show this help message
   -v, --version          Show version
 
@@ -35,6 +36,7 @@ Examples:
   ${PACKAGE_NAME} install
   ${PACKAGE_NAME} install --scope global
   ${PACKAGE_NAME} install --mode plugin
+  ${PACKAGE_NAME} install --scope local --migrate
   ${PACKAGE_NAME} uninstall --scope local
   ${PACKAGE_NAME} status
   ${PACKAGE_NAME} clear-cache
@@ -77,6 +79,10 @@ async function main(): Promise<void> {
         short: "f",
         default: false,
       },
+      migrate: {
+        type: "boolean",
+        default: false,
+      },
       package: {
         type: "string",
       },
@@ -112,6 +118,7 @@ async function main(): Promise<void> {
   const command = positionals[0];
   const scope: Scope | undefined = values.scope as Scope | undefined;
   const force: boolean = values.force;
+  const migrate: boolean = values.migrate;
   const mode: InstallMode | null =
     values.mode === undefined
       ? null
@@ -132,7 +139,7 @@ async function main(): Promise<void> {
   try {
     switch (command) {
       case "install":
-        await installCommand({ scope: scope ?? null, force, mode });
+        await installCommand({ scope: scope ?? null, force, mode, migrate });
         break;
       case "uninstall":
         await uninstallCommand({ scope, force });

@@ -608,6 +608,48 @@ describe("install advisory (one-shot)", () => {
   });
 });
 
+describe("failure advisory (one-shot)", () => {
+  test("three failing hook invocations emit exactly one failure advisory, and the D5 advisory still fires independently in a later session", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      await writeGlobalPluginConfig([PACKAGE_NAME]);
+      const failingDir = await makeFixture("failure-advisory-once");
+      await mkdir(SANDBOX_GLOBAL_BASE, { recursive: true });
+      await writeFile(join(SANDBOX_GLOBAL_BASE, "skills"), "not a directory");
+
+      const { client, captured } = makeCapturingClient();
+      // @ts-ignore - PluginInput requires full context, we only need directory and client
+      const failingPlugin = await plugin({ directory: failingDir, client });
+      const failingConfig = failingPlugin.config as ((input: unknown) => Promise<void>) | undefined;
+
+      await failingConfig?.({});
+      await failingConfig?.({});
+      await failingConfig?.({});
+
+      expect(captured.logs.length).toBe(1);
+      expect(captured.logs[0]?.body?.level).toBe("warn");
+      expect(captured.logs[0]?.body?.message).toContain("startup self-ensure failed");
+      expect(captured.toasts.length).toBe(1);
+      expect(captured.toasts[0]?.body?.message).toContain("startup self-ensure failed");
+
+      await resetGlobalConfig();
+      const freshDir = await makeFixture("failure-advisory-d5-independent");
+      const { client: freshClient, captured: freshCaptured } = makeCapturingClient();
+      // @ts-ignore - PluginInput requires full context, we only need directory and client
+      const freshPlugin = await plugin({ directory: freshDir, client: freshClient });
+      const freshConfig = freshPlugin.config as ((input: unknown) => Promise<void>) | undefined;
+
+      await freshConfig?.({});
+
+      expect(freshCaptured.logs.length).toBe(1);
+      expect(freshCaptured.logs[0]?.body?.level).toBe("warn");
+      expect(freshCaptured.logs[0]?.body?.message).toContain("is not installed in any scope");
+      expect(freshCaptured.toasts.length).toBe(1);
+      expect(freshCaptured.toasts[0]?.body?.message).toContain("is not installed in any scope");
+    });
+  });
+});
+
 describe("detectAurelia", () => {
   const aureliaDir = join(import.meta.dirname, ".test-aurelia");
 

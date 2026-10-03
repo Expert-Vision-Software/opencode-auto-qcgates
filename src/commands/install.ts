@@ -13,6 +13,7 @@ interface InstallCommandOptions {
   scope: Scope | null;
   force: boolean;
   mode: InstallMode | null;
+  migrate: boolean;
 }
 
 export async function installCommand(options: InstallCommandOptions): Promise<void> {
@@ -35,7 +36,7 @@ export async function installCommand(options: InstallCommandOptions): Promise<vo
 
   const projectDir = process.cwd();
 
-  if (scope === "local") {
+  if (scope === "local" && options.migrate) {
     const migration = await checkMigrationNeeded(projectDir);
 
     if (migration.needed && migration.rootConfig && migration.dotOpenencodeConfig) {
@@ -58,7 +59,7 @@ export async function installCommand(options: InstallCommandOptions): Promise<vo
 
   const installOptions: InstallOptions = {
     addPluginConfig: true,
-    migrateRootConfig: true,
+    migrateRootConfig: options.migrate,
     force: options.force,
   };
 
