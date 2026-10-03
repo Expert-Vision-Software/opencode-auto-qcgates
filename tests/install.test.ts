@@ -437,6 +437,30 @@ describe("loud bundled-asset absence", () => {
     expect(error.message).toContain(PACKAGE_NAME);
     expect(await exists(join(fixtureDir, ".opencode", `${PACKAGE_NAME}.manifest.json`))).toBe(false);
   });
+
+  test("install names the content source dirs when they hold no recognized files", async () => {
+    const fixtureDir = await makeFixture("install-unrecognized-content");
+    const packageDir = join(TEST_DIR, "package-with-unrecognized-content");
+    await rm(packageDir, { recursive: true, force: true });
+    await mkdir(join(packageDir, "skills", "keep"), { recursive: true });
+    await mkdir(join(packageDir, "commands"), { recursive: true });
+    await writeFile(join(packageDir, "commands", "notes.txt"), "x");
+
+    const error = (await install(
+      "local",
+      fixtureDir,
+      INSTALL_OPTIONS,
+      null,
+      false,
+      packageDir
+    ).catch((caught: unknown) => caught)) as BundledAssetsMissingError;
+
+    expect(error).toBeInstanceOf(BundledAssetsMissingError);
+    expect(error.message).toContain(join(packageDir, "skills"));
+    expect(error.message).toContain(join(packageDir, "commands"));
+    expect(error.message).not.toContain(`missing or empty: ${packageDir}.`);
+    expect(await exists(join(fixtureDir, ".opencode", `${PACKAGE_NAME}.manifest.json`))).toBe(false);
+  });
 });
 
 describe("content declaration and mode resolution", () => {

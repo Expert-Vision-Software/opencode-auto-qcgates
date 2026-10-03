@@ -190,6 +190,10 @@ async function collectAssetFiles(packageDir: string): Promise<PlannedAssetFile[]
   return planned;
 }
 
+function contentSourceDirs(packageDir: string): string[] {
+  return [...ASSET_PAYLOAD_DIRS, "agents"].map(contentDir => join(packageDir, ASSET_LAYOUT_DIR, contentDir));
+}
+
 async function collectSkillFiles(assetsRoot: string): Promise<PlannedAssetFile[]> {
   return collectGroupedFiles(assetsRoot, "skills");
 }
@@ -569,7 +573,7 @@ export async function install(
 
   if (plannedFiles.length === 0) {
     throw new BundledAssetsMissingError(
-      join(pkgDir, ASSET_LAYOUT_DIR),
+      contentSourceDirs(pkgDir).join(", "),
       packageName,
       packageVersion,
       cacheRoot
