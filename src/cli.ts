@@ -3,7 +3,10 @@ import { parseArgs } from "node:util";
 import { installCommand } from "./commands/install.ts";
 import { uninstallCommand } from "./commands/uninstall.ts";
 import { statusCommand } from "./commands/status.ts";
-import type { Scope } from "./installer.ts";
+import { CacheCleaner } from "./cache-cleaner.ts";
+import { ClearCacheUsageError } from "./clear-cache-usage-error.ts";
+import { CopyModeUnsupportedError } from "./copy-mode-unsupported-error.ts";
+import type { InstallMode, Scope } from "./installer.ts";
 
 const pkg = JSON.parse(
   await Bun.file(`${import.meta.dirname}/../package.json`).text()
@@ -16,22 +19,46 @@ function printHelp(): void {
 ${PACKAGE_NAME} v${VERSION}
 
 Commands:
-  install     Install the skills, commands, and agents
-  uninstall   Remove the skills, commands, and agents
-  status      Check installation status
+  install      Install the skills, commands, and agents
+  uninstall    Remove the skills, commands, and agents
+  status       Check installation status
+  clear-cache  Remove this package's cached copies from OpenCode's package cache
 
 Options:
   -s, --scope <scope>    Installation scope: "local" or "global"
-  -f, --force           Skip confirmation prompts
-  -h, --help            Show this help message
-  -v, --version         Show version
+  -m, --mode <mode>      Install mode: "plugin" or "copy"
+  -f, --force            Skip confirmation prompts
+  -h, --help             Show this help message
+  -v, --version          Show version
 
 Examples:
   ${PACKAGE_NAME} install
   ${PACKAGE_NAME} install --scope global
+  ${PACKAGE_NAME} install --mode plugin
   ${PACKAGE_NAME} uninstall --scope local
   ${PACKAGE_NAME} status
+  ${PACKAGE_NAME} clear-cache
 `);
+}
+
+function isInstallMode(value: string): value is InstallMode {
+  return value === "copy" || value === "plugin";
+}
+
+async function clearCacheCommand(): Promise<void> {
+  const cleaner = new CacheCleaner();
+  const outcome = await cleaner.clearPackageCache(PACKAGE_NAME);
+  if (outcome.removed.length === 0) {
+    console.log("No cached copies found; nothing to remove.");
+  } else {
+    console.log("Removed cached copies:");
+    for (const target of outcome.removed) {
+      console.log(`  Removed: ${target}`);
+    }
+  }
+  for (const warning of outcome.warnings) {
+    console.warn(`  Warning: ${warning}`);
+  }
 }
 
 async function main(): Promise<void> {
@@ -41,9 +68,20 @@ async function main(): Promise<void> {
         type: "string",
         short: "s",
       },
+      mode: {
+        type: "string",
+        short: "m",
+      },
       force: {
         type: "boolean",
         short: "f",
+        default: false,
+      },
+      package: {
+        type: "string",
+      },
+      all: {
+        type: "boolean",
         default: false,
       },
       help: {
@@ -74,16 +112,27 @@ async function main(): Promise<void> {
   const command = positionals[0];
   const scope: Scope | undefined = values.scope as Scope | undefined;
   const force: boolean = values.force;
+  const mode: InstallMode | null =
+    values.mode === undefined
+      ? null
+      : isInstallMode(values.mode)
+        ? values.mode
+        : ("invalid" as InstallMode);
 
   if (scope && scope !== "local" && scope !== "global") {
     console.error(`Invalid scope: ${scope}. Must be "local" or "global".`);
     process.exit(1);
   }
 
+  if (mode === ("invalid" as InstallMode)) {
+    console.error(`Invalid mode: ${values.mode}. Must be "copy" or "plugin".`);
+    process.exit(1);
+  }
+
   try {
     switch (command) {
       case "install":
-        await installCommand({ scope, force });
+        await installCommand({ scope: scope ?? null, force, mode });
         break;
       case "uninstall":
         await uninstallCommand({ scope, force });
@@ -91,12 +140,25 @@ async function main(): Promise<void> {
       case "status":
         await statusCommand();
         break;
+      case "clear-cache":
+        if (values.package !== undefined || values.all || positionals.length > 1) {
+          throw new ClearCacheUsageError(
+            "clear-cache is self-only: it removes only this package's own cached copies. " +
+              "It accepts no --package or --all option and no extra arguments."
+          );
+        }
+        await clearCacheCommand();
+        break;
       default:
         console.error(`Unknown command: ${command}`);
         printHelp();
         process.exit(1);
     }
   } catch (error) {
+    if (error instanceof CopyModeUnsupportedError || error instanceof ClearCacheUsageError) {
+      console.error(`Error: ${error.message}`);
+      process.exit(1);
+    }
     const message = error instanceof Error ? error.message : String(error);
     console.error(`Error: ${message}`);
     process.exit(1);

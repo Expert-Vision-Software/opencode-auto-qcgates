@@ -1,4 +1,5 @@
 import type { Plugin, Config, PluginInput } from "@opencode-ai/plugin";
+import { join } from "node:path";
 import {
   install,
   readLocalConfig,
@@ -14,6 +15,8 @@ const PLUGIN_SERVICE_NAME = "opencode-auto-qcgates";
 const ADVISORY_TOAST_DURATION_MS = 10000;
 const INSTALL_ADVISORY_MESSAGE = `${PLUGIN_SERVICE_NAME} is not installed in any scope. Run "bunx opencode-auto-qcgates install --scope global" to enable the quality-gate skills and commands.`;
 const LOAD_INSTALL_OPTIONS = { addPluginConfig: false, migrateRootConfig: false, force: false };
+const LOAD_PRUNE_CACHE = false;
+const FALLBACK_CACHE_DIR = "~/.cache/opencode/packages/opencode-auto-qcgates@<version>";
 
 type PluginClient = PluginInput["client"] | undefined;
 
@@ -92,19 +95,41 @@ async function reportLoadSkippedFiles(client: PluginClient, result: InstallResul
 }
 
 async function ensureScopeAssets(client: PluginClient, scope: Scope, directory: string): Promise<InstallResult> {
-  const result = await install(scope, directory, LOAD_INSTALL_OPTIONS);
+  const result = await install(scope, directory, LOAD_INSTALL_OPTIONS, null, LOAD_PRUNE_CACHE);
   await reportLoadSkippedFiles(client, result);
   return result;
+}
+
+function getCacheBaseDir(): string {
+  const xdgCache = process.env.XDG_CACHE_HOME;
+  if (xdgCache) {
+    return join(xdgCache, "opencode", "packages");
+  }
+  return "~/.cache/opencode/packages";
+}
+
+function getCacheDirDisplay(packageName: string, packageVersion: string): string {
+  return `${getCacheBaseDir()}/${packageName}@${packageVersion}`;
 }
 
 async function buildFailureMessage(error: unknown): Promise<string> {
   const detail = error instanceof Error ? error.message : String(error);
   const packageName = await getPackageName();
-  const cacheDir = `~/.cache/opencode/packages/${packageName}@${await getPackageVersion()}`;
+  const cacheDir = getCacheDirDisplay(packageName, await getPackageVersion());
   return (
-    `${PLUGIN_SERVICE_NAME} startup self-ensure failed: ${detail}. Remedies: run ` +
-    `"bunx ${packageName} install --scope global", or, if the OpenCode plugin cache is corrupt, ` +
-    `remove the cached copy and restart: "rm -rf ${cacheDir}".`
+    `${PLUGIN_SERVICE_NAME} startup self-ensure failed: ${detail} Remedies: run ` +
+    `"bunx ${packageName} install --scope global", then restart. If the OpenCode plugin ` +
+    `cache is corrupt, run "bunx ${packageName} clear-cache" and restart ` +
+    `(cache dir: ${cacheDir}).`
+  );
+}
+
+function buildFailureFallbackMessage(): string {
+  return (
+    `${PLUGIN_SERVICE_NAME} startup self-ensure failed and the package metadata is unreadable. ` +
+    `Remedies: run "bunx ${PLUGIN_SERVICE_NAME} install --scope global", then restart. ` +
+    `If the OpenCode plugin cache is corrupt, run "bunx ${PLUGIN_SERVICE_NAME} clear-cache" ` +
+    `and restart (cache dir: ${FALLBACK_CACHE_DIR}).`
   );
 }
 
@@ -113,17 +138,27 @@ async function emitFailureAdvisory(client: PluginClient, error: unknown): Promis
   try {
     message = await buildFailureMessage(error);
   } catch {
-    message =
-      `${PLUGIN_SERVICE_NAME} startup self-ensure failed and the package metadata is unreadable. ` +
-      `Remedies: run "bunx ${PLUGIN_SERVICE_NAME} install --scope global", or clear the plugin cache ` +
-      `under ~/.cache/opencode/packages/ and restart.`;
+    message = buildFailureFallbackMessage();
   }
   await logWarn(client, message);
   await showToastAdvisory(client, message);
 }
 
+async function maybeEmitFailureAdvisory(
+  state: AdvisoryState,
+  client: PluginClient,
+  error: unknown
+): Promise<void> {
+  if (state.emitted) {
+    return;
+  }
+  state.emitted = true;
+  await emitFailureAdvisory(client, error);
+}
+
 const plugin: Plugin = async ({ directory, client }) => {
-  const advisoryState: AdvisoryState = { emitted: false };
+  const installAdvisoryState: AdvisoryState = { emitted: false };
+  const failureAdvisoryState: AdvisoryState = { emitted: false };
 
   return {
     config: async (input: Config) => {
@@ -135,7 +170,7 @@ const plugin: Plugin = async ({ directory, client }) => {
         const scopes = RegistrationDetector.scopesToEnsure(context);
 
         if (scopes.length === 0) {
-          await maybeEmitInstallAdvisory(advisoryState, client, directory);
+          await maybeEmitInstallAdvisory(installAdvisoryState, client, directory);
           return;
         }
 
@@ -143,7 +178,7 @@ const plugin: Plugin = async ({ directory, client }) => {
           await ensureScopeAssets(client, scope, directory);
         }
       } catch (error) {
-        await emitFailureAdvisory(client, error);
+        await maybeEmitFailureAdvisory(failureAdvisoryState, client, error);
       }
     },
   };

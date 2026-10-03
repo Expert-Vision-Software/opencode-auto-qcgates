@@ -5,6 +5,7 @@
   "type": "module",
   "module": "index.ts",
   "sideEffects": false,
+  "content": "code",
   "engines": {
     "bun": ">=1.0.0"
   },

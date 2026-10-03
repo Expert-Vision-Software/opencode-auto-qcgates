@@ -1,8 +1,8 @@
 import { copyFile, exists, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, basename } from "node:path";
 import { PluginNameNormalizer } from "./plugin-name.ts";
-import { InstallManifest, type ManifestFileEntry } from "./manifest.ts";
+import { InstallManifest, type InstallMode, type ManifestFileEntry } from "./manifest.ts";
 import {
   loadPackageManifest,
   mergeOptionalDependencies,
@@ -10,20 +10,13 @@ import {
   type ExternalSkillSource,
   type PackageOptionalDep,
 } from "./optional-deps.ts";
+import { PluginConfigEditor } from "./plugin-config.ts";
+import { CacheCleaner, type CacheOutcome } from "./cache-cleaner.ts";
+import { BundledAssetsMissingError } from "./bundled-assets-missing-error.ts";
+import { CopyModeUnsupportedError } from "./copy-mode-unsupported-error.ts";
 
 export type Scope = "local" | "global";
-
-export class ScopeResolver {
-  static resolve(directory: string, globalConfigPath: string): Scope {
-    const isExact = directory === globalConfigPath;
-    const isUnderForward = directory.startsWith(globalConfigPath + "/");
-    const isUnderBack = directory.startsWith(globalConfigPath + "\\");
-    if (isExact || isUnderForward || isUnderBack) {
-      return "global";
-    }
-    return "local";
-  }
-}
+export type { InstallMode } from "./manifest.ts";
 
 export interface InstallOptions {
   addPluginConfig: boolean;
@@ -45,13 +38,16 @@ export type InstallAction = "installed" | "upgraded" | "noop";
 export interface InstallResult {
   action: InstallAction;
   scope: Scope;
+  mode: InstallMode;
   skillPaths: string[];
   commandPaths: string[];
-  configPath: string;
+  configPath: string | null;
   manifestPath: string;
+  entry: string | null;
   skipped: string[];
   migrated: boolean;
   pluginAdded: boolean;
+  clearedCache: string[];
   recommendations: string[];
 }
 
@@ -81,6 +77,11 @@ const DEP_GROUPS: string[] = [
   "optionalDependencies",
 ];
 
+const ASSET_PAYLOAD_DIRS: string[] = ["skills", "commands"];
+
+const pluginConfigEditor = new PluginConfigEditor();
+const cacheCleaner = new CacheCleaner();
+
 export function printRecommendations(recommendations: string[]): void {
   for (const recommendation of recommendations) {
     console.log(`\n${recommendation}`);
@@ -90,6 +91,9 @@ export function printRecommendations(recommendations: string[]): void {
 export interface ScopeStatus {
   installed: boolean;
   version: string | null;
+  mode: InstallMode | null;
+  entry: string | null;
+  configPath: string | null;
   pluginInConfig: boolean;
 }
 
@@ -108,6 +112,22 @@ export async function getPackageName(): Promise<string> {
   return JSON.parse(content).name;
 }
 
+export async function getContentDeclaration(): Promise<"assets" | "code"> {
+  const content = await Bun.file(`${import.meta.dirname}/../package.json`).text();
+  return JSON.parse(content).content === "code" ? "code" : "assets";
+}
+
+export async function resolveMode(requested: InstallMode | null): Promise<InstallMode> {
+  const declaration = await getContentDeclaration();
+  if (declaration === "code") {
+    if (requested === "copy") {
+      throw new CopyModeUnsupportedError(await getPackageName());
+    }
+    return "plugin";
+  }
+  return requested ?? "copy";
+}
+
 export function getGlobalConfigPath(): string {
   const xdgConfig = process.env.XDG_CONFIG_HOME;
   if (xdgConfig) {
@@ -124,28 +144,29 @@ function getPackageDir(): string {
   return join(import.meta.dirname, "..");
 }
 
-export function assetsMissingError(
-  assetsSkillsPath: string,
-  packageName: string,
-  packageVersion: string
-): string {
-  const cacheDir = `~/.cache/opencode/packages/${packageName}@${packageVersion}`;
-  return (
-    `Package assets not found at ${assetsSkillsPath}. ` +
-    `Installs must run from the published package (e.g. "bunx ${packageName}@latest install" ` +
-    `or a global install), never from a partial cache artifact. ` +
-    `If OpenCode loaded this copy from its plugin cache, remove the cached copy so the next start ` +
-    `re-installs it, then restart: "rm -rf ${cacheDir}"`
-  );
+function getPackagesCacheRoot(): string {
+  return cacheCleaner.packagesCacheRoot();
 }
 
-async function resolvePackageDir(): Promise<string> {
-  const packageDir = getPackageDir();
-  const assetsSkillsPath = join(packageDir, "assets", "skills");
-  if (!(await exists(assetsSkillsPath))) {
-    throw new Error(
-      assetsMissingError(assetsSkillsPath, await getPackageName(), await getPackageVersion())
-    );
+async function isAssetDirEmpty(assetDir: string): Promise<boolean> {
+  try {
+    return (await readdir(assetDir)).length === 0;
+  } catch {
+    return true;
+  }
+}
+
+export async function resolvePackageDir(
+  packageName: string,
+  packageVersion: string,
+  cacheRoot: string,
+  packageDir: string = getPackageDir()
+): Promise<string> {
+  for (const payloadDir of ASSET_PAYLOAD_DIRS) {
+    const assetDir = join(packageDir, "assets", payloadDir);
+    if (await isAssetDirEmpty(assetDir)) {
+      throw new BundledAssetsMissingError(assetDir, packageName, packageVersion, cacheRoot);
+    }
   }
   return packageDir;
 }
@@ -369,84 +390,58 @@ async function writeJsonConfig(path: string, config: Record<string, unknown>): P
   await writeFile(path, JSON.stringify(config, null, 2));
 }
 
-async function addPluginToConfig(configPath: string, packageName: string): Promise<boolean> {
-  const config = await readJsonConfig(configPath);
+async function readPluginEntries(configPath: string): Promise<string[] | null> {
+  let content: string;
+  try {
+    content = await readFile(configPath, "utf-8");
+  } catch (error) {
+    if (isFileNotFoundError(error)) {
+      return [];
+    }
+    return null;
+  }
+  const config = parseConfigContent(content, configPath);
   if (config === null) {
     console.warn(
-      `[${packageName}] Refusing to write ${configPath}: the file is not valid JSON. ` +
-        `Fix or remove the file, then re-run install. The file was left unchanged.`
+      `Warning: config file ${configPath} could not be parsed; ignoring it for registration ` +
+        `detection. The file was left unchanged.`
     );
-    return false;
+    return null;
   }
-
-  if (!config.plugin) {
-    config.plugin = [];
+  const plugins = config["plugin"];
+  if (!Array.isArray(plugins)) {
+    return [];
   }
-
-  const plugins = config.plugin as string[];
-  if (plugins.some(entry => PluginNameNormalizer.matches(entry, packageName))) {
-    return false;
-  }
-
-  plugins.push(PluginNameNormalizer.canonicalize(packageName));
-  config.plugin = plugins;
-
-  await mkdir(join(configPath, ".."), { recursive: true });
-  await writeFile(configPath, JSON.stringify(config, null, 2));
-  return true;
+  return plugins.filter((entry): entry is string => typeof entry === "string");
 }
 
-async function removePluginFromConfig(configPath: string, packageName: string): Promise<boolean> {
-  const config = await readJsonConfig(configPath);
-  if (config === null) {
-    console.warn(
-      `[${packageName}] Refusing to write ${configPath}: the file is not valid JSON. ` +
-        `Fix or remove the file manually. The file was left unchanged.`
-    );
-    return false;
+export async function isPluginInConfigBase(
+  configBase: string,
+  packageName: string
+): Promise<boolean> {
+  let registered = false;
+  for (const candidate of candidateConfigPaths(configBase)) {
+    const entries = await readPluginEntries(candidate);
+    if (entries === null) {
+      continue;
+    }
+    if (entries.some(entry => PluginNameNormalizer.matches(entry, packageName))) {
+      registered = true;
+    }
   }
-
-  if (!config.plugin) {
-    return false;
-  }
-
-  const plugins = config.plugin as string[];
-  const remaining = plugins.filter(entry => !PluginNameNormalizer.matches(entry, packageName));
-
-  if (remaining.length === plugins.length) {
-    return false;
-  }
-
-  if (remaining.length === 0) {
-    delete config.plugin;
-  } else {
-    config.plugin = remaining;
-  }
-
-  await mkdir(join(configPath, ".."), { recursive: true });
-  await writeFile(configPath, JSON.stringify(config, null, 2));
-  return true;
+  return registered;
 }
 
-export async function isPluginInConfig(configPath: string, packageName: string): Promise<boolean> {
-  const config = await readJsonConfig(configPath);
-  if (config === null) {
-    return false;
+function candidateConfigPaths(configBase: string): string[] {
+  const paths: string[] = [
+    join(configBase, "opencode.json"),
+    join(configBase, "opencode.jsonc"),
+  ];
+  if (basename(configBase) === ".opencode") {
+    const repoRoot = dirname(configBase);
+    paths.push(join(repoRoot, "opencode.json"), join(repoRoot, "opencode.jsonc"));
   }
-
-  if (!config.plugin) {
-    return false;
-  }
-
-  const plugins = config.plugin as string[];
-  return plugins.some(entry => PluginNameNormalizer.matches(entry, packageName));
-}
-
-export async function isPluginInConfigBase(configBase: string, packageName: string): Promise<boolean> {
-  if (await isPluginInConfig(join(configBase, "opencode.json"), packageName)) {
-    return true;
-  }
-  return isPluginInConfig(join(configBase, "opencode.jsonc"), packageName);
+  return paths;
 }
 
 export async function checkMigrationNeeded(projectDir: string): Promise<{
@@ -508,7 +503,8 @@ export async function migrateRootConfig(
     return false;
   }
 
-  if (dotOpenencodeConfig === null && (await exists(dotOpenencodeConfigPath))) {
+  const dotExists = await exists(dotOpenencodeConfigPath);
+  if (dotExists && dotOpenencodeConfig === null) {
     console.warn(
       `Refusing to migrate ${rootConfigPath}: ${dotOpenencodeConfigPath} is not valid JSON. ` +
         `Both files were left unchanged.`
@@ -516,7 +512,7 @@ export async function migrateRootConfig(
     return false;
   }
 
-  if (dotOpenencodeConfig) {
+  if (dotExists && dotOpenencodeConfig !== null) {
     const hasConflict = Object.keys(rootConfig).some(key => key in dotOpenencodeConfig);
     if (hasConflict && onConflict) {
       const shouldContinue = await onConflict(rootConfig, dotOpenencodeConfig);
@@ -524,12 +520,11 @@ export async function migrateRootConfig(
         return false;
       }
     }
-
     const merged = { ...rootConfig, ...dotOpenencodeConfig };
     await writeJsonConfig(dotOpenencodeConfigPath, merged);
   } else {
     await mkdir(join(projectDir, ".opencode"), { recursive: true });
-    await writeJsonConfig(dotOpenencodeConfigPath, rootConfig);
+    await writeFile(dotOpenencodeConfigPath, await readFile(rootConfigPath, "utf-8"));
   }
 
   await rm(rootConfigPath);
@@ -539,16 +534,24 @@ export async function migrateRootConfig(
 export async function install(
   scope: Scope,
   projectDir: string = process.cwd(),
-  options: InstallOptions
+  options: InstallOptions,
+  requestedMode: InstallMode | null = null,
+  pruneCache: boolean = true
 ): Promise<InstallResult> {
   const packageName = await getPackageName();
   const packageVersion = await getPackageVersion();
-  const pkgDir = await resolvePackageDir();
+  const cacheRoot = getPackagesCacheRoot();
+
+  const cache = pruneCache
+    ? await pruneOwnCache(packageName, packageVersion)
+    : noCacheOutcome();
+
+  const mode = await resolveMode(requestedMode);
+  const pkgDir = await resolvePackageDir(packageName, packageVersion, cacheRoot);
 
   const { addPluginConfig, migrateRootConfig: allowRootMigration, force } = options;
 
   const configBase = scope === "global" ? getGlobalConfigPath() : getLocalConfigPath(projectDir);
-  const configPath = join(configBase, "opencode.json");
   const manifestPath = join(configBase, `${packageName}.manifest.json`);
 
   let migrated = false;
@@ -560,6 +563,15 @@ export async function install(
   const manifest = await InstallManifest.read(manifestPath);
   const sameVersion = manifest.matchesVersion(packageVersion);
   const plannedFiles = await collectAssetFiles(pkgDir);
+
+  if (plannedFiles.length === 0) {
+    throw new BundledAssetsMissingError(
+      join(pkgDir, "assets"),
+      packageName,
+      packageVersion,
+      cacheRoot
+    );
+  }
 
   const writtenRelativePaths: string[] = [];
   const skipped: string[] = [];
@@ -595,6 +607,22 @@ export async function install(
   const action: InstallAction =
     writtenRelativePaths.length === 0 ? "noop" : manifest.hasContents() ? "upgraded" : "installed";
 
+  let entry = manifest.entry;
+  let configPath = manifest.configPath;
+  let pluginAdded = false;
+
+  if (addPluginConfig) {
+    const outcome = await pluginConfigEditor.ensurePluginEntry(packageName, { scope, projectDir });
+    if (outcome.warning !== null) {
+      console.warn(`[${packageName}] ${outcome.warning}`);
+    }
+    if (outcome.action !== "blocked") {
+      entry = PluginNameNormalizer.canonicalize(packageName);
+      configPath = outcome.configPath;
+      pluginAdded = outcome.action === "updated" || outcome.action === "created";
+    }
+  }
+
   const pkgManifest = await loadPackageManifest(pkgDir);
   let declaredDeps: PackageOptionalDep[] = [];
   if (!pkgManifest.ok) {
@@ -606,17 +634,30 @@ export async function install(
   }
   const depMerge = mergeOptionalDependencies(manifest.optionalDependencies, declaredDeps);
 
-  if (action !== "noop" || depMerge.changed) {
-    if (action !== "noop") {
+  const registrationRecorded =
+    manifest.mode === mode && manifest.entry === entry && manifest.configPath === configPath;
+  const shouldWriteManifest =
+    recordedFiles.length > 0 &&
+    (writtenRelativePaths.length > 0 ||
+      depMerge.changed ||
+      pluginAdded ||
+      !manifest.hasContents() ||
+      !registrationRecorded);
+
+  if (shouldWriteManifest) {
+    if (writtenRelativePaths.length > 0) {
       await removeStaleVersionMarkers(join(configBase, "skills"));
     }
     const filesToRecord = action === "noop" ? manifest.files : recordedFiles;
-    await InstallManifest.write(manifestPath, packageVersion, filesToRecord, depMerge.dependencies);
-  }
-
-  let pluginAdded = false;
-  if (addPluginConfig) {
-    pluginAdded = await addPluginToConfig(configPath, packageName);
+    await InstallManifest.write(
+      manifestPath,
+      packageVersion,
+      filesToRecord,
+      depMerge.dependencies,
+      mode,
+      entry,
+      configPath
+    );
   }
 
   const aureliaCheck = await detectAurelia(projectDir);
@@ -630,15 +671,30 @@ export async function install(
   return {
     action,
     scope,
+    mode,
     skillPaths: writtenSkillDirs(configBase, writtenRelativePaths),
     commandPaths: writtenCommandFiles(configBase, writtenRelativePaths),
     configPath,
     manifestPath,
+    entry,
     skipped,
     migrated,
     pluginAdded,
+    clearedCache: cache.removed,
     recommendations,
   };
+}
+
+function noCacheOutcome(): CacheOutcome {
+  return { removed: [], warnings: [] };
+}
+
+async function pruneOwnCache(packageName: string, packageVersion: string): Promise<CacheOutcome> {
+  const outcome = await cacheCleaner.prunePackageCache(packageName, packageVersion);
+  for (const warning of outcome.warnings) {
+    console.warn(`[${packageName}] Warning: ${warning}`);
+  }
+  return outcome;
 }
 
 export async function uninstall(
@@ -648,7 +704,6 @@ export async function uninstall(
   const packageName = await getPackageName();
 
   const configBase = scope === "global" ? getGlobalConfigPath() : getLocalConfigPath(projectDir);
-  const configPath = join(configBase, "opencode.json");
 
   const removed: string[] = [];
 
@@ -690,10 +745,11 @@ export async function uninstall(
     removed.push(manifestPath);
   }
 
-  let pluginRemoved = false;
-  if (await exists(configPath)) {
-    pluginRemoved = await removePluginFromConfig(configPath, packageName);
+  const outcome = await pluginConfigEditor.removePluginEntry(packageName, { scope, projectDir });
+  if (outcome.warning !== null) {
+    console.warn(`[${packageName}] ${outcome.warning}`);
   }
+  const pluginRemoved = outcome.action === "removed";
 
   return { scope, removed, pluginRemoved };
 }
@@ -712,21 +768,34 @@ export async function isScopeInstalled(configBase: string, packageName: string):
 
 async function readScopeStatus(configBase: string, packageName: string): Promise<ScopeStatus | null> {
   const manifest = await InstallManifest.read(join(configBase, `${packageName}.manifest.json`));
-  const legacySkillDir = join(configBase, "skills", "test-baselining");
-  if (!manifest.hasContents() && !(await exists(legacySkillDir))) {
+  if (!manifest.hasContents()) {
     return null;
   }
-  const version = manifest.hasContents() ? manifest.version : await readLegacySkillVersion(legacySkillDir);
-  const pluginInConfig = await isPluginInConfig(join(configBase, "opencode.json"), packageName);
-  return { installed: true, version, pluginInConfig };
+  if (!(await manifest.payloadMatches(configBase))) {
+    return null;
+  }
+  if (manifest.mode === "plugin" && manifest.entry !== null && manifest.configPath !== null) {
+    if (!(await isRecordedEntryPresent(manifest.configPath, packageName))) {
+      return null;
+    }
+  }
+  const pluginInConfig = await isPluginInConfigBase(configBase, packageName);
+  return {
+    installed: true,
+    version: manifest.version,
+    mode: manifest.mode,
+    entry: manifest.entry,
+    configPath: manifest.configPath,
+    pluginInConfig,
+  };
 }
 
-async function readLegacySkillVersion(skillDir: string): Promise<string | null> {
-  try {
-    return (await readFile(join(skillDir, ".version"), "utf-8")).trim();
-  } catch {
-    return null;
+async function isRecordedEntryPresent(configPath: string, packageName: string): Promise<boolean> {
+  const entries = await readPluginEntries(configPath);
+  if (entries === null) {
+    return false;
   }
+  return entries.some(entry => PluginNameNormalizer.matches(entry, packageName));
 }
 
 export async function detectAurelia(projectDir: string): Promise<AureliaRecommendation> {
