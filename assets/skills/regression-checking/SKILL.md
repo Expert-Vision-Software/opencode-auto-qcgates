@@ -1,6 +1,6 @@
 ---
-name: regression-checking
-description: Quality regression detection for autonomous agents and human reviewers. Use when answering "did we break anything?", "should I proceed or stop?", or "is it safe to commit?". Interprets test-baselining results against baseline; emits PROCEED / STOP / REVIEW decision signals for agents.
+name: "regression-checking"
+description: "Quality regression detection for autonomous agents and human reviewers. Use when answering \"did we break anything?\", \"should I proceed or stop?\", or \"is it safe to commit?\". Interprets test-baselining results against baseline; emits PROCEED / STOP / REVIEW decision signals for agents."
 ---
 
 # Regression Checking
@@ -179,9 +179,9 @@ Use visual indicators:
 
 OpenCode-specific bindings for this skill:
 
-- **Slash command** — `/regression-check` (or `/regression-check status` for a quick check without a full eval) routes through the `explore` agent with `subtask: true`. The command body loads this skill via the `loadSkill` tool.
+- **Slash command** — `/regression-check` (or `/regression-check status` for a quick check without a full eval) routes to the `task` agent (`agent: task` in the command frontmatter). The command body loads this skill via the `loadSkill` tool.
 - **Skill allowlist** — `plugin.ts` sets `agent.task.permission.skill["regression-checking"] = "allow"` so the task agent can reach this skill without a prompt.
 - **Skill chain** — OpenCode's `loadSkill({ name: "test-baselining" })` call inside this skill reuses the same install location and permission allowlist, so the chain works without extra config.
-- **Install layout** — OpenCode's plugin harness copies this skill to `.opencode/skills/regression-checking/` (project) or `~/.config/opencode/skills/regression-checking/` (global). A `.version` marker drives idempotent reinstalls.
+- **Install layout** — OpenCode's plugin harness copies this skill to `.opencode/skills/regression-checking/` (project) or `~/.config/opencode/skills/regression-checking/` (global). Idempotency is gated on the install manifest at `<configBase>/<package>.manifest.json`, which records the installed version and a per-file sha256 for each copied file: a version-and-hash match is a zero-write no-op, and files whose hash no longer matches (consumer edits) are preserved rather than overwritten.
 
 For non-OpenCode agents (Claude Code, etc.), the same `SKILL.md` works — frontmatter fields OpenCode adds are ignored, and the agent's own skill loader handles loading `test-baselining`.

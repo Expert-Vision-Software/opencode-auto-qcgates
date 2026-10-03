@@ -1,6 +1,6 @@
 ---
-description: Test baselining workflow (init|eval|update). Routes to the task agent; defaults to eval.
-agent: task
+description: "Test baselining workflow (init|eval|update). Routes to the task agent; defaults to eval."
+agent: "task"
 subtask: false
 ---
 

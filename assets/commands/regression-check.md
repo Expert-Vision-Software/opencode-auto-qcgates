@@ -1,6 +1,6 @@
 ---
-description: Regression check workflow. Routes to the task agent; answers "did we break anything?", "should I proceed or stop?", "is it safe to commit?".
-agent: task
+description: "Regression check workflow. Routes to the task agent; answers \"did we break anything?\", \"should I proceed or stop?\", \"is it safe to commit?\"."
+agent: "task"
 subtask: true
 ---
 
