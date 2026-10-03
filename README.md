@@ -245,7 +245,7 @@ The protocol is the single source of truth for thresholds. The plugin never inli
 The plugin is project-type, source-control, and language agnostic:
 
 - **Tiers.** Discovered during `init` by grilling the user — backend, frontend, scripts, docs, schemas, anything with a repeatable verification procedure. Non-code repos are first-class.
-- **Source controls.** Discovery lookup table in `assets/skills/test-baselining/refs/source-controls.md` — Git, Mercurial, Subversion, Pijul, Fossil, **Unity VCS** (Unity Version Control / Plastic SCM), Perforce, Bazaar, Darcs. The skill body never assumes git; the lookup table is consulted for the consumer's actual source control.
+- **Source controls.** Discovery lookup table in `skills/test-baselining/refs/source-controls.md` — Git, Mercurial, Subversion, Pijul, Fossil, **Unity VCS** (Unity Version Control / Plastic SCM), Perforce, Bazaar, Darcs. The skill body never assumes git; the lookup table is consulted for the consumer's actual source control.
 - **Backend toolchains.** C#, JVM, Go, Rust, Python, Node, Elixir, Erlang, Haskell, Scala, C++ — listed in `refs/backends-ref.md` (init-only guidance, never overrides the protocol).
 - **Frontend stacks.** React, Vue, Svelte, Angular, Solid, **Aurelia 2**, Lit, Ember, HTMX, … — listed in `refs/frontend-refs.md` (init-only guidance).
 - **Build artifacts.** Captured per-tier (file count, total MB, gzipped KB on critical files, build time, lint-warning categories) on every eval and written into every baseline update. They live alongside test deltas — never buried.

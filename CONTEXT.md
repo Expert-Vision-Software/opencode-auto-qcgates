@@ -77,11 +77,11 @@ The downstream repo that runs the skills. Receives `testing-protocol.md` and `te
 _Avoid_: host project, target repo, downstream
 
 **Skill Asset**:
-A bundled file (SKILL.md or template under `assets/`) shipped by this plugin and copied verbatim into a consumer project.
+A bundled file (SKILL.md or template under `skills/`) shipped by this plugin and copied verbatim into a consumer project.
 _Avoid_: asset, template, bundled file
 
 **Reference Asset**:
-A bundled file under `assets/skills/<name>/refs/` consulted by the skill body during guided workflows (notably `init`). Bundled with the skill folder but **not** authoritative after the consumer configures their stack — the protocol file is the truth. Scoped per file: `source-controls.md` is always-relevant; `backends-ref.md` and `frontend-refs.md` are init-only.
+A bundled file under `skills/<name>/refs/` consulted by the skill body during guided workflows (notably `init`). Bundled with the skill folder but **not** authoritative after the consumer configures their stack — the protocol file is the truth. Scoped per file: `source-controls.md` is always-relevant; `backends-ref.md` and `frontend-refs.md` are init-only.
 _Avoid_: helper file, side doc, appendix
 
 **Installer Recommendation**:

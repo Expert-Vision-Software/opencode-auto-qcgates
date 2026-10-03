@@ -47,18 +47,18 @@ opencode-auto-qcgates/
 │       └── release.yml       # CI: GitHub Release + npm publish --provenance
 ├── .opencode/
 │   └── opencode.json         # self-config for development
-├── assets/
-│   ├── commands/
-│   │   ├── test-baseline.md
-│   │   └── regression-check.md
-│   └── skills/
-│       ├── test-baselining/
-│       │   ├── SKILL.md
-│       │   └── templates/
-│       │       ├── testing-baseline.xml
-│       │       └── testing-protocol.md
-│       └── regression-checking/
-│           └── SKILL.md
+├── commands/
+│   ├── test-baseline.md
+│   └── regression-check.md
+├── manifest.json             # Optional-dependencies declaration
+├── skills/
+│   ├── test-baselining/
+│   │   ├── SKILL.md
+│   │   └── templates/
+│   │       ├── testing-baseline.xml
+│   │       └── testing-protocol.md
+│   └── regression-checking/
+│       └── SKILL.md
 ├── src/
 │   ├── cli.ts                # CLI entry: install / uninstall / status / clear-cache
 │   ├── commands/
@@ -120,7 +120,7 @@ When a local installation exists alongside a global one, the local configuration
 1. **No comments in TypeScript.** Use descriptive method/variable names instead.
 2. **Functions over classes where practical.** Keep logic modular and testable.
 3. **Nullable over optional** in interfaces — `value: string | null`, never `value?: string`.
-4. **Skill frontmatter is the source of truth.** Do not edit `assets/skills/*/SKILL.md` frontmatter in ways that break the `name` / `description` contract.
+4. **Skill frontmatter is the source of truth.** Do not edit `skills/*/SKILL.md` frontmatter in ways that break the `name` / `description` contract.
 5. **Only add code under `src/`** that supports the install/uninstall/status surface. This is a skill-bundling package, not a runtime library.
 
 ## Troubleshooting

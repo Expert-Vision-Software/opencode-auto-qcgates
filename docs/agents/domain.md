@@ -20,9 +20,9 @@ If you are about to do something that touches one of these files, read the file 
 ```
 harness (TypeScript)                  agent-facing material (markdown)
 ─────────────────                     ──────────────────────────────
-plugin.ts                             assets/skills/<name>/SKILL.md
-index.ts                              assets/commands/<name>.md
-src/cli.ts                            assets/skills/<name>/templates/  ← copied to consumer
+plugin.ts                             skills/<name>/SKILL.md
+index.ts                              commands/<name>.md
+src/cli.ts                            skills/<name>/templates/  ← copied to consumer
 src/installer.ts                      docs/agents/*.md                  ← repo-local skill wiring
 src/commands/                         CHANGELOG.md
 src/prompts.ts                        AGENTS.md
@@ -44,7 +44,7 @@ These are the load-bearing conventions. Read `AGENTS.md` for the full list; thes
 - **Templates are placeholders.** `templates/testing-protocol.md` and `templates/testing-baseline.xml` ship as starting points. The consumer's adapted versions are the live source; the skill body must not assume the template's structure.
 - **Changelog is append-only.** Never edit prior `<Entry>` blocks in a consumer's `testing-baseline.xml`; only append. Same for this repo's `CHANGELOG.md` between releases.
 - **Threshold matrix in the skill body is a seed.** The protocol's `baseline_thresholds` table is the live source. Defaults exist only to populate an empty protocol.
-- **`refs/` files are non-authoritative.** Files under `assets/skills/<name>/refs/` are bundled with the skill (and copied to the consumer). The skill body consults them during guided flows — `source-controls.md` is always-relevant (VCS-aware location + cache logic); `backends-ref.md` and `frontend-refs.md` are init-only (grill scaffolding for tier discovery). Once the consumer's `testing-protocol.md` is written, the references have no bearing on policy.
+- **`refs/` files are non-authoritative.** Files under `skills/<name>/refs/` are bundled with the skill (and copied to the consumer). The skill body consults them during guided flows — `source-controls.md` is always-relevant (VCS-aware location + cache logic); `backends-ref.md` and `frontend-refs.md` are init-only (grill scaffolding for tier discovery). Once the consumer's `testing-protocol.md` is written, the references have no bearing on policy.
 - **Build artefacts are mandatory in every eval and update.** Captured per-tier (file count, total MB, build time, gzipped KB on critical files, lint-warning categories) in Stage 1; surfaced alongside test deltas in the eval output; required for any `update` write — a baseline update that drops artefact fields is invalid. The XML template's `<Build>` (backend) and `<BuildArtifacts>` (frontend) shapes are mandatory tier blocks.
 - **VCS-agnostic body.** Skill bodies never assume `.git/` or git-specific commands; the `refs/source-controls.md` table is the lookup. The consumer's actual source control — Git, Mercurial, Subversion, Pijul, Fossil, Unity VCS, Perforce, Bazaar, Darcs — drives the discovery command.
 - **Backend / frontend stack agnostic at body level.** `refs/backends-ref.md` and `refs/frontend-refs.md` carry the stack-specific grill scaffolding. They are *consulted* during init; they are *not* authoritative once the protocol exists. No hard-coded "frontend = npm" anywhere in the skill.

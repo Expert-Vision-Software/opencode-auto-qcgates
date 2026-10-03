@@ -26,7 +26,7 @@ bun test        # Run unit tests
 
 **Asset structure:**
 ```
-assets/skills/test-baselining/
+skills/test-baselining/
 ├── SKILL.md
 ├── refs/                      # Bundled reference assets — non-authoritative guidance
 │   ├── source-controls.md     # Always-relevant: VCS discovery + change-detection commands (git, Mercurial, Subversion, Pijul, Fossil, **Unity VCS**, Perforce, Bazaar, Darcs)
@@ -36,12 +36,14 @@ assets/skills/test-baselining/
     ├── testing-baseline.xml   # Baseline XML template (adapted to consumer tiers on init)
     └── testing-protocol.md     # Threshold/pass-fail criteria template (tailored on init)
 
-assets/skills/regression-checking/
+skills/regression-checking/
 └── SKILL.md                   # Loads test-baselining, reads protocol for thresholds
 
-assets/commands/
+commands/
 ├── test-baseline.md
 └── regression-check.md
+
+manifest.json                  # Optional-dependencies declaration (optionalDependencies)
 ```
 
 **Install model — dot-agents universal, OpenCode-extras on top:**
@@ -66,9 +68,9 @@ After `/test-baseline init`, two files appear at the consumer project root:
 
 ## Adding Commands or Skills
 
-- **New command:** Create `assets/commands/<name>.md` with frontmatter `agent: task` and a command-appropriate `subtask` (`false` to run in the main conversation, e.g. `/test-baseline` for its grilling flow; `true` to spawn a task subagent, e.g. `/regression-check`) (OpenCode-specific — ignored by other agents). The body typically loads the corresponding skill.
+- **New command:** Create `commands/<name>.md` with frontmatter `agent: task` and a command-appropriate `subtask` (`false` to run in the main conversation, e.g. `/test-baseline` for its grilling flow; `true` to spawn a task subagent, e.g. `/regression-check`) (OpenCode-specific — ignored by other agents). The body typically loads the corresponding skill.
 
-**New skill:** Create `assets/skills/<name>/SKILL.md` with required frontmatter (`name`, `description`). Use a `templates/` subdirectory for files that should be copied to consumer projects. Body must be agent-agnostic; put any OpenCode-specific bindings in a tail `## OpenCode` section.
+**New skill:** Create `skills/<name>/SKILL.md` with required frontmatter (`name`, `description`). Use a `templates/` subdirectory for files that should be copied to consumer projects. Body must be agent-agnostic; put any OpenCode-specific bindings in a tail `## OpenCode` section.
 
 **Skill reference pattern:**
 ```markdown
@@ -83,13 +85,13 @@ After `/test-baseline init`, two files appear at the consumer project root:
 - `regression-checking` delegates to `test-baselining` and reads `testing-protocol.md` for threshold interpretation
 - Commands route to the task agent by default (clean isolation; OpenCode-only — other agents use their own routing)
 - Skill bodies are agent-agnostic; OpenCode bindings live in a tail section per skill
-- **`refs/` is reference, not policy.** Files under `assets/skills/<name>/refs/` are bundled with the skill and copied to the consumer; the skill body consults them during guided flows (`init`, `Locating the Consumer Files`, `Caching Logic`) but they are explicitly *non-authoritative* — the consumer's `testing-protocol.md` is the truth once it is written. `source-controls.md` is always-relevant; `backends-ref.md` and `frontend-refs.md` are init-only.
+- **`refs/` is reference, not policy.** Files under `skills/<name>/refs/` are bundled with the skill and copied to the consumer; the skill body consults them during guided flows (`init`, `Locating the Consumer Files`, `Caching Logic`) but they are explicitly *non-authoritative* — the consumer's `testing-protocol.md` is the truth once it is written. `source-controls.md` is always-relevant; `backends-ref.md` and `frontend-refs.md` are init-only.
 - **Skills are VCS-agnostic at the body level.** Git-specific wording is a stand-in; the lookup table lives in `refs/source-controls.md` and the agent consults it for the consumer's actual source control. Coverage: Git, Mercurial, Subversion, Pijul, Fossil, **Unity VCS** (Unity Version Control / Plastic SCM), Perforce, Bazaar, Darcs.
 - **Skills are backend-language and frontend-framework agnostic at the body level.** Stack-specific guidance lives in `refs/backends-ref.md` and `refs/frontend-refs.md` and is used only during `init` — once the user configures their protocol, the references have no bearing.
 - **Build artifacts are part of every eval and update.** Captured per-tier (file count, total MB, build time, gzipped KB on critical files, lint-warning categories) in Stage 1, surfaced alongside test deltas in the eval output, and required for any `update` write — a baseline update that drops artefact fields is invalid.
 - **Hooks never throw (ADR 0007).** The `config` hook (`plugin.ts`) wraps its body in try/catch: any failure degrades to a warn log + toast naming the exact remediation (`bunx … install`, plus the `~/.cache/opencode/packages/<name>@<version>` dir to clear for cache rot). Hard errors stay CLI-only; the hook never auto-deletes the cache (races in-flight installs). Registration detection (`src/registration.ts`, `isPluginInConfigBase`) is format-tolerant: both `opencode.json` and `opencode.jsonc` are honored in the global config dir, `.opencode/`, and the repo root.
 - **Installer recommendations are non-blocking.** The installer (`src/installer.ts#detectAurelia`, `detectOptionalSkills`) appends advisory messages to `InstallResult.recommendations` after a successful install when a known stack or optional skill is detected. `detectAurelia` is project-driven (looks at `package.json`); `detectOptionalSkills` is environment-driven (probes `<configBase>/skills/<name>/`). Recommendations suggest the right install path for the consumer's agent (OpenCode plugin config or `npx skills add/use`) but never modify the consumer config autonomously.
-- **Skill dependencies are advisory.** A skill may document optional dependencies in its frontmatter (`metadata.optional-deps:`) and chain to them at runtime via `loadSkill`. The frontmatter fields are non-functional — no host honors them; they exist for human/agent readers. The machine layer for optional dependencies is `assets/manifest.json` (`manifestVersion: 1`; entries carry `id`, `kind` (`skill` | `agent` | `mcp` | `plugin`), `description`, and a typed `source` — bundled path, external-skill repo, plugin npm spec, or MCP command-or-url), validated on read by the loader in `src/optional-deps.ts`. The plugin never auto-installs dependencies. At install time the package's declarations are unioned by `id` into the consumer-side `<name>.manifest.json` `optionalDependencies` section with per-dependency state: `pending` (declared, undecided), `accepted`, or `declined` (both sticky; revisitable via the interactive menu). The merge is idempotent — existing accepted/declined state is preserved; a new or changed declaration (`kind` or `source`) flips back to `pending`, while description-only edits refresh the stored text without resetting state. When an optional dep is missing, `detectOptionalSkills` derives its non-blocking recommendation from the manifest and appends it to `InstallResult.recommendations` (mirroring `detectAurelia`). The runtime `loadSkill` call is best-effort and no-ops when the dep is absent. Currently the only declared optional dependency is `grilling` from `mattpocock/skills` (MIT), loaded by `test-baselining init` when the consumer's tier set cannot be inferred from the source-control working-tree root.
+- **Skill dependencies are advisory.** A skill may document optional dependencies in its frontmatter (`metadata.optional-deps:`) and chain to them at runtime via `loadSkill`. The frontmatter fields are non-functional — no host honors them; they exist for human/agent readers. The machine layer for optional dependencies is `manifest.json` (`manifestVersion: 1`; entries carry `id`, `kind` (`skill` | `agent` | `mcp` | `plugin`), `description`, and a typed `source` — bundled path, external-skill repo, plugin npm spec, or MCP command-or-url), validated on read by the loader in `src/optional-deps.ts`. The plugin never auto-installs dependencies. At install time the package's declarations are unioned by `id` into the consumer-side `<name>.manifest.json` `optionalDependencies` section with per-dependency state: `pending` (declared, undecided), `accepted`, or `declined` (both sticky; revisitable via the interactive menu). The merge is idempotent — existing accepted/declined state is preserved; a new or changed declaration (`kind` or `source`) flips back to `pending`, while description-only edits refresh the stored text without resetting state. When an optional dep is missing, `detectOptionalSkills` derives its non-blocking recommendation from the manifest and appends it to `InstallResult.recommendations` (mirroring `detectAurelia`). The runtime `loadSkill` call is best-effort and no-ops when the dep is absent. Currently the only declared optional dependency is `grilling` from `mattpocock/skills` (MIT), loaded by `test-baselining init` when the consumer's tier set cannot be inferred from the source-control working-tree root.
 
 ## Agent skills
 

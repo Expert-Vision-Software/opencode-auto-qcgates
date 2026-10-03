@@ -18,12 +18,12 @@ application.
 3. `plugin/loader.ts` awaits the plugin hook chain with no timeout; a rejection propagates into
    config assembly and stalls startup.
 4. `core/src/npm.ts` reuses `~/.cache/opencode/packages/<spec>/node_modules/<name>` forever. A
-   partial extraction (e.g. missing bundled `assets/`) is never re-fetched, so a plugin whose hook
+   partial extraction (e.g. missing bundled content directories `skills/` / `commands/`) is never re-fetched, so a plugin whose hook
    validates its own integrity throws on every start — and per (2–3) that throw hangs startup.
 
 ## Reproduction (with opencode-auto-qcgates v1.5.0)
 
-1. Corrupt the cache: delete `assets/` inside
+1. Corrupt the cache: delete `skills/` and `commands/` inside
    `~/.cache/opencode/packages/opencode-auto-qcgates@1.5.0/node_modules/opencode-auto-qcgates/`.
 2. Register the package in the global config: `{ "plugin": ["opencode-auto-qcgates@1.5.0"] }`.
    The `1.5.0` pin is historical to this reproduction; current registrations use the canonical
