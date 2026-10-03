@@ -2,5 +2,5 @@
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
     "opencode-architect@^0.8.1"
-  ],
+  ]
 }

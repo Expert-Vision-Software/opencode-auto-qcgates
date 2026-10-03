@@ -63,8 +63,12 @@ opencode-auto-qcgates/
 │   │   ├── install.ts
 │   │   ├── uninstall.ts
 │   │   └── status.ts
-│   ├── installer.ts          # install/uninstall/status with ScopeResolver
-│   └── prompts.ts           # Interactive prompts
+│   ├── installer.ts          # install/uninstall/status, manifest-gated copies
+│   ├── manifest.ts           # InstallManifest: version + per-file sha256 hashes
+│   ├── optional-deps.ts      # bundled optional-dependency manifest + merge
+│   ├── plugin-name.ts        # @latest-aware plugin name normalize/match
+│   ├── prompts.ts            # Interactive prompts
+│   └── registration.ts       # read-only, config-based scope detection
 ├── tests/
 │   └── plugin.test.ts
 ├── .gitignore
@@ -79,6 +83,8 @@ opencode-auto-qcgates/
 └── tsconfig.json
 ```
 
+The `src/` list above is not exhaustive — additional modules may appear as the install, config-write, and cache surfaces grow.
+
 ## Architecture
 
 ### Install command
@@ -88,29 +94,20 @@ opencode-auto-qcgates/
 - **Local** (default): copies to `{project}/.opencode/skills/` and updates `{project}/.opencode/opencode.json`.
 - **Global**: copies to `~/.config/opencode/skills/` and updates `~/.config/opencode/opencode.json`.
 
-It also pre-grants `permission.skill: "allow"` for `test-baselining` and `regression-checking` skills and writes a `.version` marker to skip re-install on subsequent loads.
+It also pre-grants `permission.skill: "allow"` for `test-baselining` and `regression-checking` skills and writes `<package>.manifest.json` — the installed version plus per-file sha256 hashes — to skip re-install on subsequent loads.
 
 ### Plugin auto-install
 
-When OpenCode loads the package via `opencode.json` plugins array, `plugin.ts` runs the same (local) install logic with a version-marker check — so the package auto-installs skills on first use if not already installed. The check uses `ScopeResolver.resolve(directory, globalConfigPath)` so the plugin auto-installs at the correct scope.
+When OpenCode loads the package via `opencode.json` plugins array, `plugin.ts` detects the registration scope and installs only into scopes that already reference the package — so the package auto-installs skills on first use if not already installed.
 
-### Scope resolution
+### Scope detection
 
-The `ScopeResolver` class determines whether installation should be local (project-specific) or global (user-wide):
+Registration scope is detected read-only from config, never from directory identity. `RegistrationDetector.detect(directory)` in `src/registration.ts` inspects:
 
-```typescript
-export class ScopeResolver {
-  static resolve(directory: string, globalConfigPath: string): Scope {
-    const isExact = directory === globalConfigPath;
-    const isUnderForward = directory.startsWith(globalConfigPath + "/");
-    const isUnderBack = directory.startsWith(globalConfigPath + "\\");
-    if (isExact || isUnderForward || isUnderBack) {
-      return "global";
-    }
-    return "local";
-  }
-}
-```
+- the global config base (`$XDG_CONFIG_HOME/opencode`, falling back to `~/.config/opencode`), and
+- the repo's own configs: `<directory>/.opencode/` and the repo root `<directory>/`.
+
+Each base is probed for both `opencode.json` and `opencode.jsonc` through `isPluginInConfigBase()`. Plugin entries are compared with `PluginNameNormalizer.matches()`, so `name`, `name@latest`, and `name@x.y.z` count as the same package. The launch `directory` is used only to locate the repo's own configs; it is never compared against the plugin's own location (`import.meta.dirname`, `process.cwd()`, or a realpath of either) — there is no directory-identity check.
 
 ### Local overrides
 
