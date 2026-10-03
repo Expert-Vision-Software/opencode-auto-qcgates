@@ -32,7 +32,9 @@ Runs `tsc --noEmit` against `*.ts`, `src/**/*.ts`, and `tests/**/*.ts`.
 
 ```bash
 bunx . install --scope local
+bunx . install --scope local --migrate
 bunx . status
+bunx . clear-cache
 bunx . uninstall --scope local
 ```
 
@@ -58,7 +60,7 @@ opencode-auto-qcgates/
 │       └── regression-checking/
 │           └── SKILL.md
 ├── src/
-│   ├── cli.ts                # CLI entry: install / uninstall / status
+│   ├── cli.ts                # CLI entry: install / uninstall / status / clear-cache
 │   ├── commands/
 │   │   ├── install.ts
 │   │   ├── uninstall.ts
@@ -98,7 +100,7 @@ It also pre-grants `permission.skill: "allow"` for `test-baselining` and `regres
 
 ### Plugin auto-install
 
-When OpenCode loads the package via `opencode.json` plugins array, `plugin.ts` detects the registration scope and installs only into scopes that already reference the package — so the package auto-installs skills on first use if not already installed.
+When OpenCode loads the package via the `opencode.json` `plugin` array, `plugin.ts` detects the registration scope and installs only into scopes that already reference the package — so the package auto-installs skills on first use if not already installed.
 
 ### Scope detection
 

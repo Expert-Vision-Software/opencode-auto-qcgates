@@ -49,7 +49,7 @@ assets/commands/
 - **Universal install** — `plugin.ts` → `src/installer.ts` copies skills, commands, and agents to a dot-agents layout (`SKILL.md` per skill folder). Other agents consume them directly.
 - **OpenCode accommodation** — The harness additionally registers the plugin in `opencode.json`, sets the `agent.task.permission.skill` allowlist for both skills, and migrates a root `opencode.json` to `.opencode/opencode.json` when present. OpenCode's `loadSkill({ name })` tool resolves skills through the same layout.
 
-Skill bodies stay agent-agnostic. OpenCode-specific bindings live in a tail section of each `SKILL.md` and in the command frontmatter (`agent: task`, `subtask: true`).
+Skill bodies stay agent-agnostic. OpenCode-specific bindings live in a tail section of each `SKILL.md` and in the command frontmatter (`agent: task`, with a command-specific `subtask`: `false` for `/test-baseline`, `true` for `/regression-check`).
 
 ## Consumer Project Files
 
@@ -66,7 +66,7 @@ After `/test-baseline init`, two files appear at the consumer project root:
 
 ## Adding Commands or Skills
 
-- **New command:** Create `assets/commands/<name>.md` with frontmatter `agent: task` and `subtask: true` (OpenCode-specific — ignored by other agents). The body typically loads the corresponding skill.
+- **New command:** Create `assets/commands/<name>.md` with frontmatter `agent: task` and a command-appropriate `subtask` (`false` to run in the main conversation, e.g. `/test-baseline` for its grilling flow; `true` to spawn a task subagent, e.g. `/regression-check`) (OpenCode-specific — ignored by other agents). The body typically loads the corresponding skill.
 
 **New skill:** Create `assets/skills/<name>/SKILL.md` with required frontmatter (`name`, `description`). Use a `templates/` subdirectory for files that should be copied to consumer projects. Body must be agent-agnostic; put any OpenCode-specific bindings in a tail `## OpenCode` section.
 

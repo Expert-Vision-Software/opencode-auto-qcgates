@@ -124,11 +124,14 @@ Install scope (`--scope local` is default; both forms below):
 | `local` (default) | `./.opencode/skills/` — this project |
 | `global` | `~/.config/opencode/skills/` — every project |
 
+Add `--mode plugin|copy` to pick the install mode explicitly. This package declares `"content": "code"`, so it always installs in `plugin` mode (registers the plugin in `opencode.json`); `--mode copy` is rejected. Assets-only packages default to `copy` and use `--mode plugin` to opt into registration.
+
 Check / remove:
 
 ```bash
 bunx opencode-auto-qcgates status
 bunx opencode-auto-qcgates uninstall --scope local
+bunx opencode-auto-qcgates clear-cache   # remove this package's cached copies from OpenCode's package cache
 ```
 
 ### Option 3: `npx skills add` (any of 70+ agents)
