@@ -543,6 +543,43 @@ describe("content declaration and mode resolution", () => {
     expect(await isScopeInstalled(localDir, PACKAGE_NAME)).toBe(false);
     expect((await status(fixtureDir)).local).toBeNull();
   });
+
+  test("a consumer-edited installed file still reports the scope installed", async () => {
+    const fixtureDir = await makeFixture("consumer-edited-status");
+    const localDir = join(fixtureDir, ".opencode");
+    await mkdir(join(localDir, "skills", "demo"), { recursive: true });
+    await writeFile(join(localDir, "skills", "demo", "SKILL.md"), "consumer edited this");
+    await writeFile(
+      join(localDir, `${PACKAGE_NAME}.manifest.json`),
+      JSON.stringify({
+        version: "1.0.0",
+        mode: "copy",
+        entry: null,
+        configPath: null,
+        files: [{ path: "skills/demo/SKILL.md", hash: "0000000000000000000000000000000000000000000000000000000000000000" }],
+      })
+    );
+
+    expect(await isScopeInstalled(localDir, PACKAGE_NAME)).toBe(true);
+  });
+
+  test("a recorded file missing from disk is never reported as installed", async () => {
+    const fixtureDir = await makeFixture("missing-payload-status");
+    const localDir = join(fixtureDir, ".opencode");
+    await mkdir(localDir, { recursive: true });
+    await writeFile(
+      join(localDir, `${PACKAGE_NAME}.manifest.json`),
+      JSON.stringify({
+        version: "1.0.0",
+        mode: "copy",
+        entry: null,
+        configPath: null,
+        files: [{ path: "skills/demo/SKILL.md", hash: "0000000000000000000000000000000000000000000000000000000000000000" }],
+      })
+    );
+
+    expect(await isScopeInstalled(localDir, PACKAGE_NAME)).toBe(false);
+  });
 });
 
 describe("surgical plugin-array registration", () => {

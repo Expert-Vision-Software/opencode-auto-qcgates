@@ -778,7 +778,7 @@ async function readScopeStatus(configBase: string, packageName: string): Promise
   if (!manifest.hasContents()) {
     return null;
   }
-  if (!(await manifest.payloadMatches(configBase))) {
+  if (!(await manifest.payloadPresent(configBase))) {
     return null;
   }
   if (manifest.mode === "plugin" && manifest.entry !== null && manifest.configPath !== null) {

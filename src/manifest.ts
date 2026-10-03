@@ -105,13 +105,12 @@ export class InstallManifest {
     return this.contents.files.find(entry => entry.path === manifestPath)?.hash ?? null;
   }
 
-  async payloadMatches(configBase: string): Promise<boolean> {
+  async payloadPresent(configBase: string): Promise<boolean> {
     if (this.contents === null || this.contents.files.length === 0) {
       return false;
     }
     for (const entry of this.contents.files) {
-      const installedHash = await InstallManifest.hashFile(join(configBase, entry.path));
-      if (installedHash !== entry.hash) {
+      if ((await InstallManifest.hashFile(join(configBase, entry.path))) === null) {
         return false;
       }
     }
