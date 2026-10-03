@@ -6,13 +6,9 @@
 <div align="center">
 
 # opencode-auto-qcgates
+[![npm version](https://img.shields.io/npm/v/opencode-auto-qcgates?color=cb3837&label=npm)](https://www.npmjs.com/package/opencode-auto-qcgates) [![Bun](https://img.shields.io/badge/Runtime-Bun-f9f1e1?logo=bun&logoColor=black)](https://bun.sh) [![License: MIT](https://img.shields.io/badge/License-MIT-22c55e)](LICENSE) [![Platforms](https://img.shields.io/badge/Platforms-Linux%20%7C%20macOS%20%7C%20Windows-6366f1)](#installation) [![OpenCode plugin](https://img.shields.io/badge/opencode-plugin-blueviolet)](https://opencode.ai/docs/plugins) [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/Expert-Vision-Software/opencode-auto-qcgates)
 
 **Automated quality gates for AI coding agents — catch regressions, answer "did we break anything?", and emit PROCEED / STOP / REVIEW signals so your agent knows when it's safe to ship.**
-
-[![OpenCode Plugin](https://img.shields.io/badge/OpenCode-Plugin-blue?link=https://opencode.ai)](https://opencode.ai)
-[![npm version](https://img.shields.io/npm/v/opencode-auto-qcgates?label=npm)](https://www.npmjs.com/package/opencode-auto-qcgates)
-[![MIT License](https://img.shields.io/badge/License-MIT-green?link=LICENSE)](LICENSE)
-[![DeepWiki](https://img.shields.io/badge/DeepWiki-Expert--Vision--Software%2Fopencode--auto--qcgates-blue.svg?logo=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACwAAAAyCAYAAAAnWDnqAAAAAXNSR0IArs4c6QAAA05JREFUaEPtmUtyEzEQhtWTQyQLHNak2AB7ZnyXZMEjXMGeK/AIi+QuHrMnbChYY7MIh8g01fJoopFb0uhhEqqcbWTp06/uv1saEDv4O3n3dV60RfP947Mm9/SQc0ICFQgzfc4CYZoTPAswgSJCCUJUnAAoRHOAUOcATwbmVLWdGoH//PB8mnKqScAhsD0kYP3j/Yt5LPQe2KvcXmGvRHcDnpxfL2zOYJ1mFwrryWTz0advv1Ut4CJgf5uhDuDj5eUcAUoahrdY/56ebRWeraTjMt/00Sh3UDtjgHtQNHwcRGOC98BJEAEymycmYcWwOprTgcB6VZ5JK5TAJ+fXGLBm3FDAmn6oPPjR4rKCAoJCal2eAiQp2x0vxTPB3ALO2CRkwmDy5WohzBDwSEFKRwPbknEggCPB/imwrycgxX2NzoMCHhPkDwqYMr9tRcP5qNrMZHkVnOjRMWwLCcr8ohBVb1OMjxLwGCvjTikrsBOiA6fNyCrm8V1rP93iVPpwaE+gO0SsWmPiXB+jikdf6SizrT5qKasx5j8ABbHpFTx+vFXp9EnYQmLx02h1QTTrl6eDqxLnGjporxl3NL3agEvXdT0WmEost868sQOYAeJS9Q7bfUVoMGnjo4AZdUMQku50McDcMWcBPvr0SzbTAFDfvJqwLzgxwATnCgnp4wDl6Aa+Ax283gghmj+vj7feE2KBBRMW3FzOpLOADl0Isb5587h/U4gGvkt5v60Z1VLG8BhYjbzRwyQZemwAd6cCR5/XFWLYZRIMpX39AR0tjaGGiGzLVyhse5C9RKC6ai42ppWPKiBagOvaYk8lO7DajerabOZP46Lby5wKjw1HCRx7p9sVMOWGzb/vA1hwiWc6jm3MvQDTogQkiqIhJV0nBQBTU+3okKCFDy9WwferkHjtxib7t3xIUQtHxnIwtx4mpg26/HfwVNVDb4oI9RHmx5WGelRVlrtiw43zboCLaxv46AZeB3IlTkwouebTr1y2NjSpHz68WNFjHvupy3q8TFn3Hos2IAk4Ju5dCo8B3wP7VPr/FGaKiG+T+v+TQqIrOqMTL1VdWV1DdmcbO8KXBz6esmYWYKPwDL5b5FA1a0hwapHiom0r/cKaoqr+27/XcrS5UwSMbQAAAABJRU5ErkJggg==)](https://deepwiki.com/Expert-Vision-Software/opencode-auto-qcgates)
 
 [Quick start](#quick-start) · [Use cases](#use-cases) · [Commands](#commands) · [Architecture](#architecture) · [Requirements](#requirements) · [Development](#development)
 
@@ -97,11 +93,11 @@ Add to `.opencode/opencode.json` in your project:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-auto-qcgates"]
+  "plugin": ["opencode-auto-qcgates@latest"]
 }
 ```
 
-OpenCode resolves the plugin from npm on next session start and runs the install (idempotent — `.version` markers keep it a no-op).
+OpenCode resolves the plugin from npm on next session start and runs the install (idempotent — the `opencode-auto-qcgates.manifest.json` install manifest keeps it a no-op).
 
 For local development against a checkout of this repo, reference the directory directly:
 
@@ -119,7 +115,7 @@ bunx opencode-auto-qcgates install
 npx opencode-auto-qcgates install
 ```
 
-Non-interactive by design — no prompts, CI-friendly. Writes a `.version` marker so subsequent runs are no-ops. Drops the skills into the dot-agents layout (`SKILL.md` per skill folder) — which OpenCode, Claude Code, and any other compatible agent pick up natively.
+Pass `--scope local|global` to run unattended (CI-friendly); with no `--scope`, the installer prompts for install scope. Records the install in `opencode-auto-qcgates.manifest.json` so subsequent runs are no-ops. Drops the skills into the dot-agents layout (`SKILL.md` per skill folder) — which OpenCode, Claude Code, and any other compatible agent pick up natively.
 
 Install scope (`--scope local` is default; both forms below):
 
@@ -237,7 +233,7 @@ The protocol is the single source of truth for thresholds. The plugin never inli
 - **Works with what you already run** — any test framework, any language, any source control. Tier discovery is grilling; the protocol is the truth.
 - **Decision signals, not just numbers** — structured `PROCEED` / `STOP` / `REVIEW` JSON lets agents act autonomously or pause for human approval.
 - **Build artefacts are first-class** — file count, total MB, gzipped KB on critical files, build time, lint-warning categories. Captured on every eval and surfaced alongside test deltas.
-- **Local-first** — Global installable; local projects override settings without conflicts. `.version` markers keep reinstalls idempotent.
+- **Local-first** — Global installable; local projects override settings without conflicts. The `opencode-auto-qcgates.manifest.json` install manifest keeps reinstalls idempotent.
 - **Zero overhead when idle** — Skill metadata loads at startup; full body loads only when the agent decides the skill is relevant.
 - **Open & cross-agent** — agent-agnostic skill bodies; OpenCode-specific bindings layered as a thin tail in each `SKILL.md`.
 
