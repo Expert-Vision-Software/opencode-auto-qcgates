@@ -1,22 +1,39 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { join } from "node:path";
 import { exists, mkdir, rm, readFile, writeFile } from "node:fs/promises";
-import { assetsMissingError, install, migrateRootConfig, uninstall } from "../src/installer.ts";
+import {
+  getContentDeclaration,
+  install,
+  isScopeInstalled,
+  migrateRootConfig,
+  resolveMode,
+  resolvePackageDir,
+  status,
+  uninstall,
+} from "../src/installer.ts";
 import { PluginNameNormalizer } from "../src/plugin-name.ts";
+import { InstallManifest } from "../src/manifest.ts";
+import { BundledAssetsMissingError } from "../src/bundled-assets-missing-error.ts";
+import { CopyModeUnsupportedError } from "../src/copy-mode-unsupported-error.ts";
+import { CacheCleaner } from "../src/cache-cleaner.ts";
 import { snapshotDirectory } from "./snapshot.ts";
 import { SANDBOX_GLOBAL_BASE, resetGlobalConfig, withGlobalSandbox } from "./global-sandbox.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".test-install");
+const SANDBOX_CACHE = join(import.meta.dirname, ".test-cache");
+process.env.XDG_CACHE_HOME = SANDBOX_CACHE;
 const PACKAGE_NAME = "opencode-auto-qcgates";
 const CANONICAL_PLUGIN_REF = `${PACKAGE_NAME}@latest`;
 
 beforeAll(async () => {
   await rm(TEST_DIR, { recursive: true, force: true });
   await mkdir(TEST_DIR, { recursive: true });
+  await rm(SANDBOX_CACHE, { recursive: true, force: true });
 });
 
 afterAll(async () => {
   await rm(TEST_DIR, { recursive: true, force: true });
+  await rm(SANDBOX_CACHE, { recursive: true, force: true });
 });
 
 async function makeFixture(name: string): Promise<string> {
@@ -110,7 +127,7 @@ describe("config writes over unparseable JSON", () => {
 
     expect(pluginAdded).toBe(false);
     expect(await readLocalConfigRaw(fixtureDir)).toBe(invalidContent);
-    expect(warnings.join("\n")).toContain("not valid JSON");
+    expect(warnings.join("\n")).toContain("could not be parsed");
     expect(warnings.join("\n")).toContain("left unchanged");
   });
 
@@ -323,15 +340,304 @@ describe("root config migration guard", () => {
 });
 
 describe("cache-rot error text", () => {
-  test("assetsMissingError names the cache directory and both remedies", () => {
-    const message = assetsMissingError(
-      "/some/cache/node_modules/opencode-auto-qcgates/assets/skills",
+  test("BundledAssetsMissingError names the path, package, version, cache dir, and remedies", () => {
+    const error = new BundledAssetsMissingError(
+      "/cache/node_modules/opencode-auto-qcgates/assets/skills",
       "opencode-auto-qcgates",
-      "1.5.0"
+      "1.5.0",
+      "/home/user/.cache/opencode/packages"
     );
-    expect(message).toContain("Package assets not found at");
-    expect(message).toContain("bunx opencode-auto-qcgates@latest install");
-    expect(message).toContain("~/.cache/opencode/packages/opencode-auto-qcgates@1.5.0");
-    expect(message).toMatch(/rm -rf/);
+    expect(error.message).toContain("/cache/node_modules/opencode-auto-qcgates/assets/skills");
+    expect(error.message).toContain("opencode-auto-qcgates");
+    expect(error.message).toContain("1.5.0");
+    expect(error.message).toContain(
+      "/home/user/.cache/opencode/packages/opencode-auto-qcgates@1.5.0"
+    );
+    expect(error.message).toContain("bunx opencode-auto-qcgates clear-cache");
+    expect(error.message).toContain("bunx opencode-auto-qcgates install --scope global");
+  });
+});
+
+describe("loud bundled-asset absence", () => {
+  test("throws when a bundled asset directory is missing", async () => {
+    const packageDir = join(TEST_DIR, "package-without-assets");
+    await rm(packageDir, { recursive: true, force: true });
+    await mkdir(packageDir, { recursive: true });
+
+    await expect(
+      resolvePackageDir(PACKAGE_NAME, "1.6.0", "/cache/packages", packageDir)
+    ).rejects.toBeInstanceOf(BundledAssetsMissingError);
+  });
+
+  test("throws when a bundled asset directory exists but is empty", async () => {
+    const packageDir = join(TEST_DIR, "package-with-empty-assets");
+    await rm(packageDir, { recursive: true, force: true });
+    await mkdir(join(packageDir, "assets", "skills"), { recursive: true });
+    await mkdir(join(packageDir, "assets", "commands"), { recursive: true });
+
+    const error = (await resolvePackageDir(
+      PACKAGE_NAME,
+      "1.6.0",
+      "/cache/packages",
+      packageDir
+    ).catch((caught: unknown) => caught)) as BundledAssetsMissingError;
+
+    expect(error).toBeInstanceOf(BundledAssetsMissingError);
+    expect(error.message).toContain(join(packageDir, "assets", "skills"));
+    expect(error.message).toContain("/cache/packages/opencode-auto-qcgates@1.6.0");
+  });
+
+  test("returns the package dir when both payload directories hold files", async () => {
+    const packageDir = join(TEST_DIR, "package-with-assets");
+    await rm(packageDir, { recursive: true, force: true });
+    await mkdir(join(packageDir, "assets", "skills", "a"), { recursive: true });
+    await writeFile(join(packageDir, "assets", "skills", "a", "SKILL.md"), "x");
+    await mkdir(join(packageDir, "assets", "commands"), { recursive: true });
+    await writeFile(join(packageDir, "assets", "commands", "c.md"), "x");
+
+    expect(
+      await resolvePackageDir(PACKAGE_NAME, "1.6.0", "/cache/packages", packageDir)
+    ).toBe(packageDir);
+  });
+});
+
+describe("content declaration and mode resolution", () => {
+  test("package.json declares content: code", async () => {
+    expect(await getContentDeclaration()).toBe("code");
+  });
+
+  test("resolveMode forces plugin for a code-backed package", async () => {
+    expect(await resolveMode(null)).toBe("plugin");
+    expect(await resolveMode("plugin")).toBe("plugin");
+  });
+
+  test("resolveMode rejects copy for a code-backed package", async () => {
+    await expect(resolveMode("copy")).rejects.toBeInstanceOf(CopyModeUnsupportedError);
+  });
+
+  test("install persists mode, entry, and configPath in the manifest and reports them", async () => {
+    const fixtureDir = await makeFixture("mode-manifest");
+    const result = await install("local", fixtureDir, {
+      addPluginConfig: true,
+      migrateRootConfig: false,
+      force: false,
+    });
+
+    expect(result.mode).toBe("plugin");
+    expect(result.entry).toBe(CANONICAL_PLUGIN_REF);
+    expect(result.configPath).toBe(join(fixtureDir, ".opencode", "opencode.json"));
+
+    const manifest = JSON.parse(await readFile(result.manifestPath, "utf-8")) as {
+      mode: string;
+      entry: string | null;
+      configPath: string | null;
+    };
+    expect(manifest.mode).toBe("plugin");
+    expect(manifest.entry).toBe(CANONICAL_PLUGIN_REF);
+    expect(manifest.configPath).toBe(join(fixtureDir, ".opencode", "opencode.json"));
+  });
+
+  test("install with --mode copy throws CopyModeUnsupportedError", async () => {
+    const fixtureDir = await makeFixture("mode-copy-rejected");
+    await expect(install("local", fixtureDir, INSTALL_OPTIONS, "copy")).rejects.toBeInstanceOf(
+      CopyModeUnsupportedError
+    );
+  });
+
+  test("status reports mode and entry for an installed scope", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("status-mode");
+      await install("local", fixtureDir, {
+        addPluginConfig: true,
+        migrateRootConfig: false,
+        force: false,
+      });
+
+      const result = await status(fixtureDir);
+
+      expect(result.local?.installed).toBe(true);
+      expect(result.local?.mode).toBe("plugin");
+      expect(result.local?.entry).toBe(CANONICAL_PLUGIN_REF);
+      expect(result.local?.configPath).toBe(join(fixtureDir, ".opencode", "opencode.json"));
+    });
+  });
+
+  test("a zero-file manifest is never reported as installed", async () => {
+    const fixtureDir = await makeFixture("zero-file-manifest");
+    const localDir = join(fixtureDir, ".opencode");
+    await mkdir(localDir, { recursive: true });
+    await writeFile(
+      join(localDir, `${PACKAGE_NAME}.manifest.json`),
+      JSON.stringify({
+        version: "9.9.9",
+        mode: "plugin",
+        entry: null,
+        configPath: null,
+        files: [],
+      })
+    );
+
+    expect(await isScopeInstalled(localDir, PACKAGE_NAME)).toBe(false);
+    expect((await status(fixtureDir)).local).toBeNull();
+  });
+});
+
+describe("surgical plugin-array registration", () => {
+  test("splice preserves comments, key order, and unrelated keys byte-for-byte", async () => {
+    const fixtureDir = await makeFixture("splice-comments");
+    const localDir = join(fixtureDir, ".opencode");
+    await mkdir(localDir, { recursive: true });
+    const content = [
+      "{",
+      "  // keep this comment",
+      '  "$schema": "https://opencode.ai/config.json",',
+      '  "model": "some/model",',
+      '  "plugin": [',
+      '    "opencode-architect"',
+      "  ]",
+      "}",
+    ].join("\n");
+    await writeFile(join(localDir, "opencode.jsonc"), content);
+
+    await install("local", fixtureDir, {
+      addPluginConfig: true,
+      migrateRootConfig: false,
+      force: false,
+    });
+
+    const after = await readFile(join(localDir, "opencode.jsonc"), "utf-8");
+    expect(after).toContain("// keep this comment");
+    expect(after).toContain('"model": "some/model"');
+    expect(after).toContain('"opencode-architect"');
+    expect(after).toContain(CANONICAL_PLUGIN_REF);
+  });
+
+  test("a semantically matching plugin entry is a zero-write no-op", async () => {
+    const fixtureDir = await makeFixture("splice-noop");
+    const localDir = join(fixtureDir, ".opencode");
+    await mkdir(localDir, { recursive: true });
+    const content = `{\n  "plugin": ["${PACKAGE_NAME}@1.2.0"]\n}\n`;
+    await writeFile(join(localDir, "opencode.json"), content);
+
+    await install("local", fixtureDir, {
+      addPluginConfig: true,
+      migrateRootConfig: false,
+      force: false,
+    });
+    const before = await snapshotDirectory(fixtureDir);
+
+    const result = await install("local", fixtureDir, {
+      addPluginConfig: true,
+      migrateRootConfig: false,
+      force: false,
+    });
+
+    expect(result.pluginAdded).toBe(false);
+    expect(await readFile(join(localDir, "opencode.json"), "utf-8")).toBe(content);
+    expect(await snapshotDirectory(fixtureDir)).toEqual(before);
+  });
+  test("a removed registration makes status report not installed and a later install re-adds it", async () => {
+    const fixtureDir = await makeFixture("entry-removed");
+    await install("local", fixtureDir, {
+      addPluginConfig: true,
+      migrateRootConfig: false,
+      force: false,
+    });
+    const configPath = join(fixtureDir, ".opencode", "opencode.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({ $schema: "https://opencode.ai/config.json" }, null, 2)
+    );
+
+    expect((await status(fixtureDir)).local).toBeNull();
+
+    const result = await install("local", fixtureDir, {
+      addPluginConfig: true,
+      migrateRootConfig: false,
+      force: false,
+    });
+
+    expect(result.pluginAdded).toBe(true);
+    expect((await status(fixtureDir)).local?.installed).toBe(true);
+  });
+});
+
+describe("legacy manifest backward compatibility", () => {
+  test("a manifest without mode reads back as copy with null entry and configPath", async () => {
+    const fixtureDir = await makeFixture("legacy-manifest-mode");
+    const localDir = join(fixtureDir, ".opencode");
+    await mkdir(localDir, { recursive: true });
+    const manifestPath = join(localDir, `${PACKAGE_NAME}.manifest.json`);
+    await writeFile(
+      manifestPath,
+      JSON.stringify({ version: "1.0.0", files: [{ path: "skills/x/SKILL.md", hash: "a".repeat(64) }] })
+    );
+
+    const manifest = await InstallManifest.read(manifestPath);
+
+    expect(manifest.hasContents()).toBe(true);
+    expect(manifest.mode).toBe("copy");
+    expect(manifest.entry).toBeNull();
+    expect(manifest.configPath).toBeNull();
+  });
+});
+
+describe("CacheCleaner self-scoped pruning", () => {
+  const CACHE_ROOT = join(SANDBOX_CACHE, "opencode", "packages");
+
+  async function seedCache(): Promise<void> {
+    process.env.XDG_CACHE_HOME = SANDBOX_CACHE;
+    await rm(CACHE_ROOT, { recursive: true, force: true });
+    for (const name of [
+      "opencode-auto-qcgates",
+      "opencode-auto-qcgates@latest",
+      "opencode-auto-qcgates@1.6.0",
+      "opencode-auto-qcgates@1.2.0",
+      "other-package@latest",
+    ]) {
+      await mkdir(join(CACHE_ROOT, name), { recursive: true });
+    }
+  }
+
+  test("prunePackageCache removes only this package's own copies, never pinned other versions or other packages", async () => {
+    await seedCache();
+    const cleaner = new CacheCleaner();
+
+    const outcome = await cleaner.prunePackageCache("opencode-auto-qcgates", "1.6.0");
+
+    expect(outcome.warnings).toEqual([]);
+    expect(outcome.removed.sort()).toEqual(
+      [
+        join(CACHE_ROOT, "opencode-auto-qcgates"),
+        join(CACHE_ROOT, "opencode-auto-qcgates@latest"),
+        join(CACHE_ROOT, "opencode-auto-qcgates@1.6.0"),
+      ].sort()
+    );
+    expect(await exists(join(CACHE_ROOT, "opencode-auto-qcgates@1.2.0"))).toBe(true);
+    expect(await exists(join(CACHE_ROOT, "other-package@latest"))).toBe(true);
+  });
+
+  test("clearPackageCache removes <package> and every <package>@* idempotently", async () => {
+    await seedCache();
+    const cleaner = new CacheCleaner();
+
+    const first = await cleaner.clearPackageCache("opencode-auto-qcgates");
+    expect(first.removed.length).toBe(4);
+    expect(await exists(join(CACHE_ROOT, "opencode-auto-qcgates@1.2.0"))).toBe(false);
+    expect(await exists(join(CACHE_ROOT, "other-package@latest"))).toBe(true);
+
+    const second = await cleaner.clearPackageCache("opencode-auto-qcgates");
+    expect(second.removed).toEqual([]);
+    expect(second.warnings).toEqual([]);
+  });
+
+  test("nothing cached is a success", async () => {
+    process.env.XDG_CACHE_HOME = SANDBOX_CACHE;
+    await rm(CACHE_ROOT, { recursive: true, force: true });
+    const cleaner = new CacheCleaner();
+    const outcome = await cleaner.clearPackageCache("opencode-auto-qcgates");
+    expect(outcome.removed).toEqual([]);
+    expect(outcome.warnings).toEqual([]);
   });
 });

@@ -12,6 +12,8 @@ import {
   type InstallOptionalDep,
 } from "../src/optional-deps.ts";
 
+process.env.XDG_CACHE_HOME = join(import.meta.dirname, ".test-xdg-cache");
+
 const VALID_MANIFEST: PackageManifest = {
   manifestVersion: 1,
   optionalDependencies: [

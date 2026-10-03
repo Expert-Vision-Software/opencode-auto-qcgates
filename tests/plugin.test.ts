@@ -12,6 +12,7 @@ import {
 } from "./global-sandbox.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".test-temp");
+process.env.XDG_CACHE_HOME = join(import.meta.dirname, ".test-xdg-cache");
 const PACKAGE_NAME = "opencode-auto-qcgates";
 
 beforeAll(async () => {
@@ -185,7 +186,7 @@ describe("TestBaseliningPlugin", () => {
       expect(captured.logs[0]?.body?.message).toContain("bunx opencode-auto-qcgates install --scope global");
       expect(captured.toasts[0]?.body?.message).toContain("bunx opencode-auto-qcgates install --scope global");
       expect(captured.logs[0]?.body?.message).toContain(
-        `~/.cache/opencode/packages/${PACKAGE_NAME}@`
+        `opencode/packages/${PACKAGE_NAME}@`
       );
       expectSkillPermissions(input);
     });
