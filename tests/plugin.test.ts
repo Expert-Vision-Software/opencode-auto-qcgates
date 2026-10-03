@@ -71,7 +71,7 @@ describe("TestBaseliningPlugin", () => {
     });
   });
 
-  test("repo-local registration: ensures repo assets and preserves the config file byte-for-byte", async () => {
+  test("repo-local registration: ensures repo content and preserves the config file byte-for-byte", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       const fixtureDir = await makeFixture("repo-local-ensure");
@@ -141,7 +141,7 @@ describe("TestBaseliningPlugin", () => {
     });
   });
 
-  test("repo-local registration via .opencode/opencode.jsonc: assets ensured, jsonc file preserved byte-for-byte", async () => {
+  test("repo-local registration via .opencode/opencode.jsonc: content ensured, jsonc file preserved byte-for-byte", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       const fixtureDir = await makeFixture("repo-local-jsonc-ensure");
@@ -230,7 +230,7 @@ describe("TestBaseliningPlugin", () => {
     });
   });
 
-  test("repo-root opencode.json registration: root file never touched, assets under .opencode", async () => {
+  test("repo-root opencode.json registration: root file never touched, content under .opencode", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       const fixtureDir = await makeFixture("repo-root-registration");
@@ -273,7 +273,7 @@ describe("TestBaseliningPlugin", () => {
     });
   });
 
-  test("repo-local registration with an unparseable nested config: assets ensured, invalid file preserved", async () => {
+  test("repo-local registration with an unparseable nested config: content ensured, invalid file preserved", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       const fixtureDir = await makeFixture("repo-local-invalid-config");

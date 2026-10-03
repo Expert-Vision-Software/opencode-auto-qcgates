@@ -26,7 +26,9 @@
     "index.ts",
     "plugin.ts",
     "src",
-    "assets"
+    "skills",
+    "commands",
+    "manifest.json"
   ],
   "scripts": {
     "check": "tsc --noEmit",

@@ -77,6 +77,8 @@ const DEP_GROUPS: string[] = [
   "optionalDependencies",
 ];
 
+const ASSET_LAYOUT_DIR = ".";
+
 const ASSET_PAYLOAD_DIRS: string[] = ["skills", "commands"];
 
 const pluginConfigEditor = new PluginConfigEditor();
@@ -163,7 +165,7 @@ export async function resolvePackageDir(
   packageDir: string = getPackageDir()
 ): Promise<string> {
   for (const payloadDir of ASSET_PAYLOAD_DIRS) {
-    const assetDir = join(packageDir, "assets", payloadDir);
+    const assetDir = join(packageDir, ASSET_LAYOUT_DIR, payloadDir);
     if (await isAssetDirEmpty(assetDir)) {
       throw new BundledAssetsMissingError(assetDir, packageName, packageVersion, cacheRoot);
     }
@@ -182,9 +184,9 @@ interface PlannedAssetFile {
 
 async function collectAssetFiles(packageDir: string): Promise<PlannedAssetFile[]> {
   const planned: PlannedAssetFile[] = [];
-  planned.push(...(await collectSkillFiles(join(packageDir, "assets", "skills"))));
-  planned.push(...(await collectCommandFiles(join(packageDir, "assets", "commands"))));
-  planned.push(...(await collectAgentFiles(join(packageDir, "assets", "agents"))));
+  planned.push(...(await collectSkillFiles(join(packageDir, ASSET_LAYOUT_DIR, "skills"))));
+  planned.push(...(await collectCommandFiles(join(packageDir, ASSET_LAYOUT_DIR, "commands"))));
+  planned.push(...(await collectAgentFiles(join(packageDir, ASSET_LAYOUT_DIR, "agents"))));
   return planned;
 }
 
@@ -567,7 +569,7 @@ export async function install(
 
   if (plannedFiles.length === 0) {
     throw new BundledAssetsMissingError(
-      join(pkgDir, "assets"),
+      join(pkgDir, ASSET_LAYOUT_DIR),
       packageName,
       packageVersion,
       cacheRoot

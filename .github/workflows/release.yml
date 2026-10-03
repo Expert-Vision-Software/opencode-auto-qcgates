@@ -116,7 +116,7 @@ jobs:
           npm pack --dry-run --json > tarball.json
           node -e "
             const fs = require('fs');
-            const expected = ['index.ts', 'plugin.ts', 'src', 'assets'];
+            const expected = ['index.ts', 'plugin.ts', 'src', 'skills', 'commands', 'manifest.json'];
             const [pack] = JSON.parse(fs.readFileSync('tarball.json', 'utf8'));
             const paths = pack.files.map((f) => f.path);
             const missing = expected.filter(

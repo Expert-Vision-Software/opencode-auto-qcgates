@@ -342,12 +342,12 @@ describe("root config migration guard", () => {
 describe("cache-rot error text", () => {
   test("BundledAssetsMissingError names the path, package, version, cache dir, and remedies", () => {
     const error = new BundledAssetsMissingError(
-      "/cache/node_modules/opencode-auto-qcgates/assets/skills",
+      "/cache/node_modules/opencode-auto-qcgates/skills",
       "opencode-auto-qcgates",
       "1.5.0",
       "/home/user/.cache/opencode/packages"
     );
-    expect(error.message).toContain("/cache/node_modules/opencode-auto-qcgates/assets/skills");
+    expect(error.message).toContain("/cache/node_modules/opencode-auto-qcgates/skills");
     expect(error.message).toContain("opencode-auto-qcgates");
     expect(error.message).toContain("1.5.0");
     expect(error.message).toContain(
@@ -372,8 +372,8 @@ describe("loud bundled-asset absence", () => {
   test("throws when a bundled asset directory exists but is empty", async () => {
     const packageDir = join(TEST_DIR, "package-with-empty-assets");
     await rm(packageDir, { recursive: true, force: true });
-    await mkdir(join(packageDir, "assets", "skills"), { recursive: true });
-    await mkdir(join(packageDir, "assets", "commands"), { recursive: true });
+    await mkdir(join(packageDir, "skills"), { recursive: true });
+    await mkdir(join(packageDir, "commands"), { recursive: true });
 
     const error = (await resolvePackageDir(
       PACKAGE_NAME,
@@ -383,21 +383,38 @@ describe("loud bundled-asset absence", () => {
     ).catch((caught: unknown) => caught)) as BundledAssetsMissingError;
 
     expect(error).toBeInstanceOf(BundledAssetsMissingError);
-    expect(error.message).toContain(join(packageDir, "assets", "skills"));
+    expect(error.message).toContain(join(packageDir, "skills"));
     expect(error.message).toContain("/cache/packages/opencode-auto-qcgates@1.6.0");
   });
 
-  test("returns the package dir when both payload directories hold files", async () => {
+  test("returns the package dir when both payload directories hold files at the package root", async () => {
     const packageDir = join(TEST_DIR, "package-with-assets");
     await rm(packageDir, { recursive: true, force: true });
-    await mkdir(join(packageDir, "assets", "skills", "a"), { recursive: true });
-    await writeFile(join(packageDir, "assets", "skills", "a", "SKILL.md"), "x");
-    await mkdir(join(packageDir, "assets", "commands"), { recursive: true });
-    await writeFile(join(packageDir, "assets", "commands", "c.md"), "x");
+    await mkdir(join(packageDir, "skills", "a"), { recursive: true });
+    await writeFile(join(packageDir, "skills", "a", "SKILL.md"), "x");
+    await mkdir(join(packageDir, "commands"), { recursive: true });
+    await writeFile(join(packageDir, "commands", "c.md"), "x");
 
     expect(
       await resolvePackageDir(PACKAGE_NAME, "1.6.0", "/cache/packages", packageDir)
     ).toBe(packageDir);
+  });
+
+  test("install copies root skills/ and commands/ from the resolved package dir", async () => {
+    const fixtureDir = await makeFixture("install-root-layout");
+    const packageDir = join(TEST_DIR, "root-layout-package");
+    await rm(packageDir, { recursive: true, force: true });
+    await mkdir(join(packageDir, "skills", "demo"), { recursive: true });
+    await writeFile(join(packageDir, "skills", "demo", "SKILL.md"), "---\nname: demo\n---\n");
+    await mkdir(join(packageDir, "commands"), { recursive: true });
+    await writeFile(join(packageDir, "commands", "demo.md"), "demo\n");
+
+    const result = await install("local", fixtureDir, INSTALL_OPTIONS, null, false, packageDir);
+
+    expect(result.action).toBe("installed");
+    expect(await exists(join(fixtureDir, ".opencode", "skills", "demo", "SKILL.md"))).toBe(true);
+    expect(await exists(join(fixtureDir, ".opencode", "commands", "demo.md"))).toBe(true);
+    expect(await exists(join(fixtureDir, ".opencode", "assets"))).toBe(false);
   });
 
   test("install rejects with BundledAssetsMissingError when the resolved package dir lacks assets", async () => {
@@ -416,7 +433,7 @@ describe("loud bundled-asset absence", () => {
     ).catch((caught: unknown) => caught)) as BundledAssetsMissingError;
 
     expect(error).toBeInstanceOf(BundledAssetsMissingError);
-    expect(error.message).toContain(join(packageDir, "assets", "skills"));
+    expect(error.message).toContain(join(packageDir, "skills"));
     expect(error.message).toContain(PACKAGE_NAME);
     expect(await exists(join(fixtureDir, ".opencode", `${PACKAGE_NAME}.manifest.json`))).toBe(false);
   });
