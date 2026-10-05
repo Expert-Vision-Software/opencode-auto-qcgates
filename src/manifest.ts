@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { access, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isValidOptionalDepEntry, type InstallOptionalDep } from "./optional-deps.ts";
+
+export type InstallMode = "copy" | "plugin";
 
 export interface ManifestFileEntry {
   path: string;
@@ -10,6 +12,9 @@ export interface ManifestFileEntry {
 
 export interface ManifestContents {
   version: string;
+  mode: InstallMode;
+  entry: string | null;
+  configPath: string | null;
   files: ManifestFileEntry[];
   optionalDependencies: InstallOptionalDep[] | null;
 }
@@ -36,12 +41,18 @@ export class InstallManifest {
     manifestPath: string,
     version: string,
     files: ManifestFileEntry[],
-    optionalDependencies?: InstallOptionalDep[]
+    optionalDependencies: InstallOptionalDep[] | null,
+    mode: InstallMode,
+    entry: string | null,
+    configPath: string | null
   ): Promise<void> {
     const contents: ManifestContents = {
       version,
+      mode,
+      entry,
+      configPath,
       files,
-      optionalDependencies: optionalDependencies ?? null,
+      optionalDependencies,
     };
     await writeFile(manifestPath, JSON.stringify(contents, null, 2) + "\n");
   }
@@ -56,6 +67,18 @@ export class InstallManifest {
 
   get version(): string | null {
     return this.contents?.version ?? null;
+  }
+
+  get mode(): InstallMode | null {
+    return this.contents?.mode ?? null;
+  }
+
+  get entry(): string | null {
+    return this.contents?.entry ?? null;
+  }
+
+  get configPath(): string | null {
+    return this.contents?.configPath ?? null;
   }
 
   get files(): ManifestFileEntry[] {
@@ -80,6 +103,27 @@ export class InstallManifest {
     }
     const manifestPath = InstallManifest.toManifestPath(relativePath);
     return this.contents.files.find(entry => entry.path === manifestPath)?.hash ?? null;
+  }
+
+  async payloadPresent(configBase: string): Promise<boolean> {
+    if (this.contents === null || this.contents.files.length === 0) {
+      return false;
+    }
+    for (const entry of this.contents.files) {
+      if (!(await InstallManifest.fileExists(join(configBase, entry.path)))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private static async fileExists(path: string): Promise<boolean> {
+    try {
+      await access(path);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async disposition(
@@ -129,6 +173,9 @@ export class InstallManifest {
     }
     return {
       version: candidate["version"],
+      mode: candidate["mode"] === "plugin" ? "plugin" : "copy",
+      entry: typeof candidate["entry"] === "string" ? candidate["entry"] : null,
+      configPath: typeof candidate["configPath"] === "string" ? candidate["configPath"] : null,
       files: candidate["files"] as ManifestFileEntry[],
       optionalDependencies,
     };

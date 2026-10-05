@@ -3,21 +3,23 @@ import {
   install,
   checkMigrationNeeded,
   printRecommendations,
+  type InstallMode,
   type Scope,
   type InstallOptions,
 } from "../installer.ts";
-import { confirmOverwrite, confirmPluginConfig } from "../prompts.ts";
+import { confirmOverwrite } from "../prompts.ts";
 
 interface InstallCommandOptions {
-  scope?: Scope;
-  force?: boolean;
+  scope: Scope | null;
+  force: boolean;
+  mode: InstallMode | null;
+  migrate: boolean;
 }
 
 export async function installCommand(options: InstallCommandOptions): Promise<void> {
   const packageName = await Bun.file(`${import.meta.dirname}/../../package.json`).text().then(t => JSON.parse(t).name);
 
   let scope: Scope;
-  const interactive = !options.scope;
 
   if (options.scope) {
     scope = options.scope;
@@ -34,7 +36,7 @@ export async function installCommand(options: InstallCommandOptions): Promise<vo
 
   const projectDir = process.cwd();
 
-  if (scope === "local") {
+  if (scope === "local" && options.migrate) {
     const migration = await checkMigrationNeeded(projectDir);
 
     if (migration.needed && migration.rootConfig && migration.dotOpenencodeConfig) {
@@ -55,19 +57,13 @@ export async function installCommand(options: InstallCommandOptions): Promise<vo
     }
   }
 
-  let addPluginConfig = true;
-
-  if (interactive) {
-    addPluginConfig = await confirmPluginConfig();
-  }
-
   const installOptions: InstallOptions = {
-    addPluginConfig,
-    migrateRootConfig: true,
-    force: options.force === true,
+    addPluginConfig: true,
+    migrateRootConfig: options.migrate,
+    force: options.force,
   };
 
-  const result = await install(scope, projectDir, installOptions);
+  const result = await install(scope, projectDir, installOptions, options.mode);
 
   if (result.action === "noop") {
     console.log(`\n${packageName} is already up to date in the ${scope} location:`);
@@ -75,13 +71,16 @@ export async function installCommand(options: InstallCommandOptions): Promise<vo
     console.log(`\nInstalled ${packageName} ${scope === "global" ? "globally" : "locally"}:`);
   }
 
+  console.log(`  Mode: ${result.mode}`);
   if (result.skillPaths.length > 0) {
     console.log(`  Skills: ${result.skillPaths.join(", ")}`);
   }
   if (result.commandPaths.length > 0) {
     console.log(`  Commands: ${result.commandPaths.join(", ")}`);
   }
-  console.log(`  Config: ${result.configPath}`);
+  if (result.entry !== null) {
+    console.log(`  Plugin entry: ${result.entry} in ${result.configPath ?? "(unknown config)"}`);
+  }
   console.log(`  Manifest: ${result.manifestPath}`);
 
   for (const skippedPath of result.skipped) {
@@ -92,8 +91,8 @@ export async function installCommand(options: InstallCommandOptions): Promise<vo
     console.log(`  Migrated: opencode.json → .opencode/opencode.json`);
   }
 
-  if (result.pluginAdded) {
-    console.log(`  Plugin: added to config`);
+  for (const cleared of result.clearedCache) {
+    console.log(`  Cleared cache: ${cleared}`);
   }
 
   printRecommendations(result.recommendations);

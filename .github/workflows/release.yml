@@ -104,12 +104,30 @@ jobs:
         uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Validate prepublish checks
         run: |
           bun run check
           bun test
+
+      - name: Verify tarball contents
+        run: |
+          npm pack --dry-run --json > tarball.json
+          node -e "
+            const fs = require('fs');
+            const expected = ['index.ts', 'src', 'skills', 'commands', 'manifest.json'];
+            const [pack] = JSON.parse(fs.readFileSync('tarball.json', 'utf8'));
+            const paths = pack.files.map((f) => f.path);
+            const missing = expected.filter(
+              (entry) => !paths.some((p) => p === entry || p.startsWith(entry + '/'))
+            );
+            if (missing.length > 0) {
+              console.error('Tarball is missing expected bundled paths: ' + missing.join(', '));
+              process.exit(1);
+            }
+            console.log('Tarball contains all expected paths: ' + expected.join(', '));
+          "
 
       - name: Publish to npm
         run: |

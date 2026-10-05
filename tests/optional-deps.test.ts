@@ -12,6 +12,8 @@ import {
   type InstallOptionalDep,
 } from "../src/optional-deps.ts";
 
+process.env.XDG_CACHE_HOME = join(import.meta.dirname, ".test-xdg-cache");
+
 const VALID_MANIFEST: PackageManifest = {
   manifestVersion: 1,
   optionalDependencies: [
@@ -39,8 +41,8 @@ describe("validatePackageManifest", () => {
     const result = validatePackageManifest({
       manifestVersion: 1,
       optionalDependencies: [
-        { id: "a", kind: "skill", description: "d", source: { type: "bundled", path: "assets/skills/a" } },
-        { id: "b", kind: "agent", description: "d", source: { type: "bundled", path: "assets/agents/b" } },
+        { id: "a", kind: "skill", description: "d", source: { type: "bundled", path: "skills/a" } },
+        { id: "b", kind: "agent", description: "d", source: { type: "bundled", path: "agents/b" } },
         { id: "c", kind: "plugin", description: "d", source: { type: "npm", package: "some-plugin" } },
         { id: "d", kind: "mcp", description: "d", source: { type: "command", command: "some-mcp --serve" } },
         { id: "e", kind: "mcp", description: "d", source: { type: "url", url: "https://example.com/mcp" } },
@@ -260,7 +262,7 @@ describe("mergeOptionalDependencies", () => {
       id: "retired-dep",
       kind: "skill",
       description: "No longer declared.",
-      source: { type: "bundled", path: "assets/skills/retired-dep" },
+      source: { type: "bundled", path: "skills/retired-dep" },
     };
     const result = mergeOptionalDependencies(
       installed(withState(retired, "declined")),
@@ -284,7 +286,7 @@ describe("mergeOptionalDependencies", () => {
       id: "kept",
       kind: "agent",
       description: "An agent dep.",
-      source: { type: "bundled", path: "assets/agents/kept" },
+      source: { type: "bundled", path: "agents/kept" },
     };
     const result = mergeOptionalDependencies(
       installed(withState(kept, "accepted"), withState(second, "accepted")),
@@ -314,7 +316,7 @@ describe("loadPackageManifest", () => {
     await rm(FIXTURES, { recursive: true, force: true });
   });
 
-  test("loads the shipped assets/manifest.json with grilling as the first entry", async () => {
+  test("loads the shipped manifest.json with grilling as the first entry", async () => {
     const result = await loadPackageManifest(PACKAGE_DIR);
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -343,17 +345,17 @@ describe("loadPackageManifest", () => {
 
   test("unparseable JSON is a validation failure, not a throw", async () => {
     const brokenDir = join(FIXTURES, "broken-json");
-    await mkdir(join(brokenDir, "assets"), { recursive: true });
-    await writeFile(join(brokenDir, "assets", "manifest.json"), "{ not json");
+    await mkdir(brokenDir, { recursive: true });
+    await writeFile(join(brokenDir, "manifest.json"), "{ not json");
     const result = await loadPackageManifest(brokenDir);
     expect(result.ok).toBe(false);
   });
 
   test("a schema-invalid manifest reports its errors", async () => {
     const invalidDir = join(FIXTURES, "invalid-schema");
-    await mkdir(join(invalidDir, "assets"), { recursive: true });
+    await mkdir(invalidDir, { recursive: true });
     await writeFile(
-      join(invalidDir, "assets", "manifest.json"),
+      join(invalidDir, "manifest.json"),
       JSON.stringify({ manifestVersion: 2, optionalDependencies: [] })
     );
     const result = await loadPackageManifest(invalidDir);

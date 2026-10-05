@@ -5,6 +5,7 @@
   "type": "module",
   "module": "index.ts",
   "sideEffects": false,
+  "content": "code",
   "engines": {
     "bun": ">=1.0.0"
   },
@@ -23,9 +24,10 @@
   },
   "files": [
     "index.ts",
-    "plugin.ts",
     "src",
-    "assets"
+    "skills",
+    "commands",
+    "manifest.json"
   ],
   "scripts": {
     "check": "tsc --noEmit",
@@ -35,13 +37,13 @@
   "keywords": ["opencode", "testing", "baselining", "quality-gates"],
   "license": "MIT",
   "dependencies": {
-    "@inquirer/prompts": "^8.3.0",
-    "@opencode-ai/plugin": "*"
+    "@inquirer/prompts": "^8.3.0"
   },
   "devDependencies": {
-    "@types/bun": "latest",
-    "@types/node": "latest",
+    "@opencode-ai/plugin": "^1.18.31",
+    "@types/bun": "^1.4.2",
+    "@types/node": "^26.6.2",
     "js-yaml": "^5.3.0",
-    "typescript": "latest"
+    "typescript": "^7.0.2"
   }
 }

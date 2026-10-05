@@ -1,11 +1,13 @@
-import { describe, test, expect } from "bun:test";
+import { describe, test, expect, spyOn } from "bun:test";
 import { join } from "node:path";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import { RegistrationDetector, type RegistrationContext } from "../src/registration.ts";
+import { install } from "../src/installer.ts";
 import { snapshotDirectory } from "./snapshot.ts";
 import { SANDBOX_GLOBAL_BASE, resetGlobalConfig, withGlobalSandbox, writeGlobalPluginConfig } from "./global-sandbox.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".test-registration");
+process.env.XDG_CACHE_HOME = join(import.meta.dirname, ".test-xdg-cache");
 const PACKAGE_NAME = "opencode-auto-qcgates";
 
 async function makeFixture(name: string): Promise<string> {
@@ -177,7 +179,76 @@ describe("RegistrationDetector.detect", () => {
       expect(await snapshotDirectory(SANDBOX_GLOBAL_BASE)).toEqual(beforeGlobal);
     });
   });
+
+  test("detects a jsonc registration whose line comment sits between the trailing comma and the array closer", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const content = `{\n  "plugin": [\n    "${PACKAGE_NAME}", // trailing comment\n  ]\n}`;
+      const fixtureDir = await makeFixture("jsonc-array-line-comment");
+      const jsoncPath = join(fixtureDir, "opencode.jsonc");
+      await writeFile(jsoncPath, content);
+
+      await expectJsoncRegistration(fixtureDir, jsoncPath, content);
+    });
+  });
+
+  test("detects a jsonc registration whose block comment sits between the trailing comma and the array closer", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const content = `{\n  "plugin": [\n    "${PACKAGE_NAME}", /* trailing comment */\n  ]\n}`;
+      const fixtureDir = await makeFixture("jsonc-array-block-comment");
+      const jsoncPath = join(fixtureDir, "opencode.jsonc");
+      await writeFile(jsoncPath, content);
+
+      await expectJsoncRegistration(fixtureDir, jsoncPath, content);
+    });
+  });
+
+  test("detects a jsonc registration whose comment sits between the trailing comma and the object closer", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const contents = [
+        `{\n  "plugin": ["${PACKAGE_NAME}"], // trailing comment\n}`,
+        `{\n  "plugin": ["${PACKAGE_NAME}"], /* trailing comment */\n}`,
+      ];
+
+      for (const [index, content] of contents.entries()) {
+        const fixtureDir = await makeFixture(`jsonc-object-comment-${index}`);
+        const jsoncPath = join(fixtureDir, "opencode.jsonc");
+        await writeFile(jsoncPath, content);
+
+        await expectJsoncRegistration(fixtureDir, jsoncPath, content);
+      }
+    });
+  });
+
+  test("keeps a comma or line comment inside a string out of the trailing-comma scanner", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const content =
+        `{\n  "plugin": ["${PACKAGE_NAME}"],\n` +
+        `  "note": "escaped quote \\" then // slashes, and a } brace"\n}`;
+      const fixtureDir = await makeFixture("jsonc-string-awareness");
+      const jsoncPath = join(fixtureDir, "opencode.jsonc");
+      await writeFile(jsoncPath, content);
+
+      await expectJsoncRegistration(fixtureDir, jsoncPath, content);
+    });
+  });
 });
+
+async function expectJsoncRegistration(fixtureDir: string, jsoncPath: string, content: string): Promise<void> {
+  const before = await snapshotDirectory(fixtureDir);
+  const warn = spyOn(console, "warn").mockImplementation(() => {});
+  try {
+    expect(await RegistrationDetector.detect(fixtureDir)).toBe("repo-local");
+    expect(warn).not.toHaveBeenCalled();
+    expect(await snapshotDirectory(fixtureDir)).toEqual(before);
+    expect(await readFile(jsoncPath, "utf-8")).toBe(content);
+  } finally {
+    warn.mockRestore();
+  }
+}
 
 describe("RegistrationDetector.scopesToEnsure", () => {
   test("maps each context to its managed scopes", () => {
@@ -189,6 +260,8 @@ describe("RegistrationDetector.scopesToEnsure", () => {
 });
 
 describe("RegistrationDetector.hasAnyInstallation", () => {
+  const INSTALL_OPTIONS = { addPluginConfig: false, migrateRootConfig: false, force: false } as const;
+
   test("returns false when nothing is installed in any scope", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
@@ -197,25 +270,74 @@ describe("RegistrationDetector.hasAnyInstallation", () => {
     });
   });
 
-  test("returns true when the global scope holds an install", async () => {
+  test("returns false for a bare skill directory without a manifest", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       const skillDir = join(SANDBOX_GLOBAL_BASE, "skills", "test-baselining");
       await mkdir(skillDir, { recursive: true });
       await writeFile(join(skillDir, "SKILL.md"), "---\nname: test-baselining\n---\n");
+      const fixtureDir = await makeFixture("install-bare-dir");
+      expect(await RegistrationDetector.hasAnyInstallation(fixtureDir)).toBe(false);
+    });
+  });
+
+  test("returns false for a bare .version marker without a manifest", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("install-bare-version");
+      const legacySkillDir = join(fixtureDir, ".opencode", "skills", "test-baselining");
+      await mkdir(legacySkillDir, { recursive: true });
+      await writeFile(join(legacySkillDir, ".version"), "1.1.0");
+      expect(await RegistrationDetector.hasAnyInstallation(fixtureDir)).toBe(false);
+    });
+  });
+
+  test("returns true when the global scope holds a manifest-backed install", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
       const fixtureDir = await makeFixture("install-global");
+      await install("global", fixtureDir, INSTALL_OPTIONS);
       expect(await RegistrationDetector.hasAnyInstallation(fixtureDir)).toBe(true);
     });
   });
 
-  test("returns true when only the repo scope holds an install", async () => {
+  test("returns true when only the repo scope holds a manifest-backed install", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       const fixtureDir = await makeFixture("install-repo");
-      const legacySkillDir = join(fixtureDir, ".opencode", "skills", "test-baselining");
-      await mkdir(legacySkillDir, { recursive: true });
-      await writeFile(join(legacySkillDir, ".version"), "1.1.0");
+      await install("local", fixtureDir, INSTALL_OPTIONS);
       expect(await RegistrationDetector.hasAnyInstallation(fixtureDir)).toBe(true);
+    });
+  });
+});
+
+describe("RegistrationDetector read-only hardening", () => {
+  test("warns for an unparseable candidate while still matching another candidate", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("unparseable-plus-match");
+      const localDir = join(fixtureDir, ".opencode");
+      await mkdir(localDir, { recursive: true });
+      const invalidContent =
+        '{\n  "$schema": "https://opencode.ai/config.json",\n  "plugin": [\n    "opencode-architect"\n  ],\n}';
+      const invalidPath = join(localDir, "opencode.json");
+      await writeFile(invalidPath, invalidContent);
+      await writeFile(
+        join(fixtureDir, "opencode.json"),
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: [PACKAGE_NAME] }, null, 2)
+      );
+
+      const warnings: string[] = [];
+      const warn = spyOn(console, "warn").mockImplementation((message: unknown) => {
+        warnings.push(String(message));
+      });
+      try {
+        expect(await RegistrationDetector.detect(fixtureDir)).toBe("repo-local");
+        expect(warnings.join("\n")).toContain(invalidPath);
+        expect(await readFile(invalidPath, "utf-8")).toBe(invalidContent);
+      } finally {
+        warn.mockRestore();
+      }
     });
   });
 });

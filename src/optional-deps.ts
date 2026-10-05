@@ -73,7 +73,7 @@ const SOURCE_REQUIRED_FIELDS: Record<string, readonly string[]> = {
   url: ["url"],
 };
 
-export const PACKAGE_MANIFEST_RELPATH = join("assets", "manifest.json");
+export const PACKAGE_MANIFEST_RELPATH = "manifest.json";
 
 export async function loadPackageManifest(packageDir: string): Promise<PackageManifestValidation> {
   let raw: string;

@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { join } from "node:path";
 import { exists, mkdir, rm, readFile, writeFile } from "node:fs/promises";
-import plugin from "../plugin.ts";
+import plugin from "../src/plugin.ts";
 import { detectAurelia, detectOptionalSkills, install } from "../src/installer.ts";
 import { snapshotDirectory } from "./snapshot.ts";
 import {
@@ -12,6 +12,7 @@ import {
 } from "./global-sandbox.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".test-temp");
+process.env.XDG_CACHE_HOME = join(import.meta.dirname, ".test-xdg-cache");
 const PACKAGE_NAME = "opencode-auto-qcgates";
 
 beforeAll(async () => {
@@ -70,7 +71,7 @@ describe("TestBaseliningPlugin", () => {
     });
   });
 
-  test("repo-local registration: ensures repo assets and preserves the config file byte-for-byte", async () => {
+  test("repo-local registration: ensures repo content and preserves the config file byte-for-byte", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       const fixtureDir = await makeFixture("repo-local-ensure");
@@ -140,7 +141,7 @@ describe("TestBaseliningPlugin", () => {
     });
   });
 
-  test("repo-local registration via .opencode/opencode.jsonc: assets ensured, jsonc file preserved byte-for-byte", async () => {
+  test("repo-local registration via .opencode/opencode.jsonc: content ensured, jsonc file preserved byte-for-byte", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       const fixtureDir = await makeFixture("repo-local-jsonc-ensure");
@@ -185,7 +186,7 @@ describe("TestBaseliningPlugin", () => {
       expect(captured.logs[0]?.body?.message).toContain("bunx opencode-auto-qcgates install --scope global");
       expect(captured.toasts[0]?.body?.message).toContain("bunx opencode-auto-qcgates install --scope global");
       expect(captured.logs[0]?.body?.message).toContain(
-        `~/.cache/opencode/packages/${PACKAGE_NAME}@`
+        `opencode/packages/${PACKAGE_NAME}@`
       );
       expectSkillPermissions(input);
     });
@@ -229,7 +230,7 @@ describe("TestBaseliningPlugin", () => {
     });
   });
 
-  test("repo-root opencode.json registration: root file never touched, assets under .opencode", async () => {
+  test("repo-root opencode.json registration: root file never touched, content under .opencode", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       const fixtureDir = await makeFixture("repo-root-registration");
@@ -272,7 +273,7 @@ describe("TestBaseliningPlugin", () => {
     });
   });
 
-  test("repo-local registration with an unparseable nested config: assets ensured, invalid file preserved", async () => {
+  test("repo-local registration with an unparseable nested config: content ensured, invalid file preserved", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       const fixtureDir = await makeFixture("repo-local-invalid-config");
@@ -603,6 +604,48 @@ describe("install advisory (one-shot)", () => {
       expect(captured.logs.length).toBe(0);
       expect(captured.toasts.length).toBe(0);
       expect(await snapshotDirectory(fixtureDir)).toEqual(before);
+    });
+  });
+});
+
+describe("failure advisory (one-shot)", () => {
+  test("three failing hook invocations emit exactly one failure advisory, and the D5 advisory still fires independently in a later session", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      await writeGlobalPluginConfig([PACKAGE_NAME]);
+      const failingDir = await makeFixture("failure-advisory-once");
+      await mkdir(SANDBOX_GLOBAL_BASE, { recursive: true });
+      await writeFile(join(SANDBOX_GLOBAL_BASE, "skills"), "not a directory");
+
+      const { client, captured } = makeCapturingClient();
+      // @ts-ignore - PluginInput requires full context, we only need directory and client
+      const failingPlugin = await plugin({ directory: failingDir, client });
+      const failingConfig = failingPlugin.config as ((input: unknown) => Promise<void>) | undefined;
+
+      await failingConfig?.({});
+      await failingConfig?.({});
+      await failingConfig?.({});
+
+      expect(captured.logs.length).toBe(1);
+      expect(captured.logs[0]?.body?.level).toBe("warn");
+      expect(captured.logs[0]?.body?.message).toContain("startup self-ensure failed");
+      expect(captured.toasts.length).toBe(1);
+      expect(captured.toasts[0]?.body?.message).toContain("startup self-ensure failed");
+
+      await resetGlobalConfig();
+      const freshDir = await makeFixture("failure-advisory-d5-independent");
+      const { client: freshClient, captured: freshCaptured } = makeCapturingClient();
+      // @ts-ignore - PluginInput requires full context, we only need directory and client
+      const freshPlugin = await plugin({ directory: freshDir, client: freshClient });
+      const freshConfig = freshPlugin.config as ((input: unknown) => Promise<void>) | undefined;
+
+      await freshConfig?.({});
+
+      expect(freshCaptured.logs.length).toBe(1);
+      expect(freshCaptured.logs[0]?.body?.level).toBe("warn");
+      expect(freshCaptured.logs[0]?.body?.message).toContain("is not installed in any scope");
+      expect(freshCaptured.toasts.length).toBe(1);
+      expect(freshCaptured.toasts[0]?.body?.message).toContain("is not installed in any scope");
     });
   });
 });

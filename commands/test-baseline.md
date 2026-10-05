@@ -1,6 +1,6 @@
 ---
-description: Test baselining workflow (init|eval|update). Routes to the task agent; defaults to eval.
-agent: task
+description: "Test baselining workflow (init|eval|update). Routes to the task agent; defaults to eval."
+agent: "task"
 subtask: false
 ---
 
@@ -28,4 +28,4 @@ Usage:
 /test-baseline update   # conditionally refresh the baseline
 ```
 
-The skill is agent-agnostic at the body level; the `agent: task` / `subtask: true` frontmatter above is OpenCode-specific binding. Other dot-agents agents see the command body and route it however their loader requires.
+The skill is agent-agnostic at the body level; the `agent: task` / `subtask: false` frontmatter above is OpenCode-specific binding. Other dot-agents agents see the command body and route it however their loader requires.
