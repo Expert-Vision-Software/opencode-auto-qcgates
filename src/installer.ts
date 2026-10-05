@@ -116,7 +116,14 @@ export async function getPackageName(): Promise<string> {
 
 export async function getContentDeclaration(): Promise<"assets" | "code"> {
   const content = await Bun.file(`${import.meta.dirname}/../package.json`).text();
-  return JSON.parse(content).content === "code" ? "code" : "assets";
+  const declaration = JSON.parse(content).content;
+  if (declaration === "code" || declaration === "assets") {
+    return declaration;
+  }
+  throw new Error(
+    `package.json is missing a valid "content" declaration (expected "assets" or "code"); ` +
+      `refusing to guess the deployment mode.`
+  );
 }
 
 export async function resolveMode(requested: InstallMode | null): Promise<InstallMode> {
@@ -169,6 +176,10 @@ export async function resolvePackageDir(
     if (await isAssetDirEmpty(assetDir)) {
       throw new BundledAssetsMissingError(assetDir, packageName, packageVersion, cacheRoot);
     }
+  }
+  const agentsDir = join(packageDir, ASSET_LAYOUT_DIR, "agents");
+  if ((await exists(agentsDir)) && (await isAssetDirEmpty(agentsDir))) {
+    throw new BundledAssetsMissingError(agentsDir, packageName, packageVersion, cacheRoot);
   }
   return packageDir;
 }
@@ -840,8 +851,8 @@ export async function detectAurelia(projectDir: string): Promise<AureliaRecommen
     "The opencode-auto-qcgates skills are VCS-agnostic and backend/frontend-language agnostic, but",
     "for richer AI-assisted Aurelia work, install the aurelia-expert skill pack (it is not a",
     "dependency — these paths are surfaced by the installer only, never auto-applied):",
-    "  - OpenCode (recommended): add \"aurelia-expert\" to your opencode.json `plugin` array, e.g.",
-    `      { "$schema": "https://opencode.ai/config.json", "plugin": ["aurelia-expert"] }`,
+    "  - OpenCode (recommended): add \"aurelia-expert@latest\" to your opencode.json `plugin` array, e.g.",
+    `      { "$schema": "https://opencode.ai/config.json", "plugin": ["aurelia-expert@latest"] }`,
     "  - Cross-agent / non-OpenCode: `npx skills add expert-vision-software/aurelia-expert`",
   ].join("\n");
 
