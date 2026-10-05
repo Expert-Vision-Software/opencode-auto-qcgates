@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-10-05
+
 ### Added
 - **Deployment-mode enforcement, cache hygiene, and loud asset absence** — `install` accepts `--mode plugin|copy` and enforces it from the package's `"content"` declaration: a code-backed package registers and rejects `--mode copy` with an explanatory `CopyModeUnsupportedError`, while an assets-only package defaults to `copy` and opts into registration with `--mode plugin`. Every install (including zero-write no-ops) prunes the package's own cache copies (`<name>`, `<name>@latest`, `<name>@<version>`) best-effort, never touching other packages or pinned copies. A new self-only `clear-cache` subcommand removes `<name>` and every `<name>@*` idempotently (nothing cached is a success); `--package`, `--all`, and extra arguments are rejected. When bundled assets are missing or empty, `install` fails loudly naming the missing path, package name and version, cache directory, and install command, and no manifest is written for a zero-file scope.
 
