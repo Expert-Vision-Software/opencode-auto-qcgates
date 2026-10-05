@@ -51,19 +51,24 @@ export class PluginConfigEditor {
     options: PluginConfigOptions
   ): Promise<EnsurePluginEntryOutcome> {
     const canonical = PluginNameNormalizer.canonicalize(packageName);
-    for (const { candidate, text, plugins } of await this.readCandidates(options)) {
+    const reads = await this.readCandidates(options);
+
+    for (const { candidate, plugins } of reads) {
+      if (plugins !== null && this.hasMatchingEntry(plugins, packageName)) {
+        return { action: "noop", configPath: candidate.path, warning: null };
+      }
+    }
+
+    for (const { candidate, text, plugins } of reads) {
+      if (!candidate.writable) {
+        continue;
+      }
       if (plugins === null) {
         return {
           action: "blocked",
           configPath: candidate.path,
           warning: this.parseFailureWarning(candidate.path),
         };
-      }
-      if (this.hasMatchingEntry(plugins, packageName)) {
-        return { action: "noop", configPath: candidate.path, warning: null };
-      }
-      if (!candidate.writable) {
-        continue;
       }
       const spliced = this.spliceEntry(text, canonical, packageName, candidate.lenient);
       if (spliced === null) {
@@ -136,10 +141,10 @@ export class PluginConfigEditor {
     const scopeBase = this.scopeBase(options.scope, options.projectDir);
     const configs: CandidateConfig[] = [];
     if (options.scope === "local") {
-      for (const root of [scopeBase, options.projectDir]) {
-        configs.push({ path: join(root, "opencode.json"), lenient: false, writable: true });
-        configs.push({ path: join(root, "opencode.jsonc"), lenient: true, writable: true });
-      }
+      configs.push({ path: join(scopeBase, "opencode.json"), lenient: false, writable: true });
+      configs.push({ path: join(scopeBase, "opencode.jsonc"), lenient: true, writable: true });
+      configs.push({ path: join(options.projectDir, "opencode.json"), lenient: false, writable: false });
+      configs.push({ path: join(options.projectDir, "opencode.jsonc"), lenient: true, writable: false });
     } else {
       configs.push({ path: join(scopeBase, "opencode.json"), lenient: false, writable: true });
       configs.push({ path: join(scopeBase, "opencode.jsonc"), lenient: true, writable: true });

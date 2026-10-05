@@ -583,6 +583,47 @@ describe("content declaration and mode resolution", () => {
 });
 
 describe("surgical plugin-array registration", () => {
+  test("registration is a no-op when a matching entry lives in a later candidate config", async () => {
+    const fixtureDir = await makeFixture("reg-later-candidate");
+    const localDir = join(fixtureDir, ".opencode");
+    await mkdir(localDir, { recursive: true });
+    const jsonPath = join(localDir, "opencode.json");
+    const jsoncPath = join(localDir, "opencode.jsonc");
+    const jsonContent = JSON.stringify({ $schema: "https://opencode.ai/config.json" }, null, 2) + "\n";
+    const jsoncContent = `{\n  "plugin": ["${CANONICAL_PLUGIN_REF}"]\n}\n`;
+    await writeFile(jsonPath, jsonContent);
+    await writeFile(jsoncPath, jsoncContent);
+
+    const result = await install("local", fixtureDir, {
+      addPluginConfig: true,
+      migrateRootConfig: false,
+      force: false,
+    });
+
+    expect(result.pluginAdded).toBe(false);
+    expect(await readFile(jsonPath, "utf-8")).toBe(jsonContent);
+    expect(await readFile(jsoncPath, "utf-8")).toBe(jsoncContent);
+  });
+
+  test("repo-root opencode.json is never written; registration creates the .opencode config", async () => {
+    const fixtureDir = await makeFixture("reg-root-sacred");
+    const rootPath = join(fixtureDir, "opencode.json");
+    const rootContent =
+      JSON.stringify({ $schema: "https://opencode.ai/config.json", model: "some/model" }, null, 2) + "\n";
+    await writeFile(rootPath, rootContent);
+
+    const result = await install("local", fixtureDir, {
+      addPluginConfig: true,
+      migrateRootConfig: false,
+      force: false,
+    });
+
+    expect(result.pluginAdded).toBe(true);
+    expect(result.configPath).toBe(join(fixtureDir, ".opencode", "opencode.json"));
+    expect(await readFile(rootPath, "utf-8")).toBe(rootContent);
+    expect(await readFile(join(fixtureDir, ".opencode", "opencode.json"), "utf-8")).toContain(CANONICAL_PLUGIN_REF);
+  });
+
   test("splice preserves comments, key order, and unrelated keys byte-for-byte", async () => {
     const fixtureDir = await makeFixture("splice-comments");
     const localDir = join(fixtureDir, ".opencode");
