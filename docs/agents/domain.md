@@ -20,7 +20,7 @@ If you are about to do something that touches one of these files, read the file 
 ```
 harness (TypeScript)                  agent-facing material (markdown)
 ─────────────────                     ──────────────────────────────
-plugin.ts                             skills/<name>/SKILL.md
+src/plugin.ts                         skills/<name>/SKILL.md
 index.ts                              commands/<name>.md
 src/cli.ts                            skills/<name>/templates/  ← copied to consumer
 src/installer.ts                      docs/agents/*.md                  ← repo-local skill wiring

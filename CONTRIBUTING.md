@@ -79,9 +79,9 @@ opencode-auto-qcgates/
 ├── CONTRIBUTING.md
 ├── LICENSE
 ├── README.md
-├── index.ts                  # module entry: re-exports plugin.ts
+├── index.ts                  # module entry: re-exports src/plugin.ts
 ├── package.json
-├── plugin.ts                 # plugin entry with config hook (auto-install on load)
+├── src/plugin.ts             # plugin entry with config hook (auto-install on load)
 └── tsconfig.json
 ```
 
@@ -100,7 +100,7 @@ It also pre-grants `permission.skill: "allow"` for `test-baselining` and `regres
 
 ### Plugin auto-install
 
-When OpenCode loads the package via the `opencode.json` `plugin` array, `plugin.ts` detects the registration scope and installs only into scopes that already reference the package — so the package auto-installs skills on first use if not already installed.
+When OpenCode loads the package via the `opencode.json` `plugin` array, `src/plugin.ts` detects the registration scope and installs only into scopes that already reference the package — so the package auto-installs skills on first use if not already installed.
 
 ### Scope detection
 
