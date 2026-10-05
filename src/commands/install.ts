@@ -1,7 +1,6 @@
 import { select } from "@inquirer/prompts";
 import {
   install,
-  resolveMode,
   checkMigrationNeeded,
   printRecommendations,
   type InstallMode,
@@ -58,9 +57,8 @@ export async function installCommand(options: InstallCommandOptions): Promise<vo
     }
   }
 
-  const resolvedMode = await resolveMode(options.mode);
   const installOptions: InstallOptions = {
-    addPluginConfig: resolvedMode === "plugin",
+    addPluginConfig: true,
     migrateRootConfig: options.migrate,
     force: options.force,
   };

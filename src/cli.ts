@@ -129,12 +129,13 @@ async function main(): Promise<void> {
   const scope: Scope | undefined = values.scope as Scope | undefined;
   const force: boolean = values.force;
   const migrate: boolean = values.migrate;
-  const mode: InstallMode | null = parseMode(values.mode);
 
   if (scope && scope !== "local" && scope !== "global") {
     console.error(`Invalid scope: ${scope}. Must be "local" or "global".`);
     process.exit(1);
   }
+
+  const mode: InstallMode | null = parseMode(values.mode);
 
   try {
     switch (command) {

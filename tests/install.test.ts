@@ -468,6 +468,15 @@ describe("content declaration and mode resolution", () => {
     expect(await getContentDeclaration()).toBe("code");
   });
 
+  test("a missing or invalid content declaration is rejected, not defaulted", async () => {
+    const packageDir = join(TEST_DIR, "package-invalid-content");
+    await rm(packageDir, { recursive: true, force: true });
+    await mkdir(packageDir, { recursive: true });
+    await writeFile(join(packageDir, "package.json"), JSON.stringify({ name: "x", version: "0.0.0" }));
+
+    await expect(getContentDeclaration(packageDir)).rejects.toThrow(/content/);
+  });
+
   test("resolveMode forces plugin for a code-backed package", async () => {
     expect(await resolveMode(null)).toBe("plugin");
     expect(await resolveMode("plugin")).toBe("plugin");

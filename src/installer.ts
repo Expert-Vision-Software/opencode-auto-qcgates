@@ -114,8 +114,8 @@ export async function getPackageName(): Promise<string> {
   return JSON.parse(content).name;
 }
 
-export async function getContentDeclaration(): Promise<"assets" | "code"> {
-  const content = await Bun.file(`${import.meta.dirname}/../package.json`).text();
+export async function getContentDeclaration(packageDir: string = getPackageDir()): Promise<"assets" | "code"> {
+  const content = await Bun.file(join(packageDir, "package.json")).text();
   const declaration = JSON.parse(content).content;
   if (declaration === "code" || declaration === "assets") {
     return declaration;
@@ -629,7 +629,7 @@ export async function install(
   let configPath = manifest.configPath;
   let pluginAdded = false;
 
-  if (addPluginConfig) {
+  if (addPluginConfig && mode === "plugin") {
     const outcome = await pluginConfigEditor.ensurePluginEntry(packageName, { scope, projectDir });
     if (outcome.warning !== null) {
       console.warn(`[${packageName}] ${outcome.warning}`);
