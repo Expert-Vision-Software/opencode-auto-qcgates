@@ -1,5 +1,4 @@
 import type { Plugin, Config, PluginInput } from "@opencode-ai/plugin";
-import { join } from "node:path";
 import {
   install,
   readLocalConfig,
@@ -10,6 +9,7 @@ import {
   type InstallResult,
 } from "./src/installer.ts";
 import { RegistrationDetector } from "./src/registration.ts";
+import { CacheCleaner } from "./src/cache-cleaner.ts";
 
 const PLUGIN_SERVICE_NAME = "opencode-auto-qcgates";
 const ADVISORY_TOAST_DURATION_MS = 10000;
@@ -100,16 +100,8 @@ async function ensureScopeAssets(client: PluginClient, scope: Scope, directory: 
   return result;
 }
 
-function getCacheBaseDir(): string {
-  const xdgCache = process.env.XDG_CACHE_HOME;
-  if (xdgCache) {
-    return join(xdgCache, "opencode", "packages");
-  }
-  return "~/.cache/opencode/packages";
-}
-
 function getCacheDirDisplay(packageName: string, packageVersion: string): string {
-  return `${getCacheBaseDir()}/${packageName}@${packageVersion}`;
+  return `${new CacheCleaner().packagesCacheRootDisplay()}/${packageName}@${packageVersion}`;
 }
 
 async function buildFailureMessage(error: unknown): Promise<string> {

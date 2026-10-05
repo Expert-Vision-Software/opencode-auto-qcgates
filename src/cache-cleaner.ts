@@ -16,6 +16,13 @@ export class CacheCleaner {
     return join(homedir(), ".cache", "opencode", "packages");
   }
 
+  packagesCacheRootDisplay(): string {
+    if (process.env.XDG_CACHE_HOME) {
+      return this.packagesCacheRoot();
+    }
+    return "~/.cache/opencode/packages";
+  }
+
   async prunePackageCache(packageName: string, packageVersion: string): Promise<CacheOutcome> {
     const wanted: string[] = [
       packageName,
