@@ -7,9 +7,9 @@ import {
   getPackageVersion,
   type Scope,
   type InstallResult,
-} from "./src/installer.ts";
-import { RegistrationDetector } from "./src/registration.ts";
-import { CacheCleaner } from "./src/cache-cleaner.ts";
+} from "./installer.ts";
+import { RegistrationDetector } from "./registration.ts";
+import { CacheCleaner } from "./cache-cleaner.ts";
 
 const PLUGIN_SERVICE_NAME = "opencode-auto-qcgates";
 const ADVISORY_TOAST_DURATION_MS = 10000;

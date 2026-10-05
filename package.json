@@ -24,7 +24,6 @@
   },
   "files": [
     "index.ts",
-    "plugin.ts",
     "src",
     "skills",
     "commands",

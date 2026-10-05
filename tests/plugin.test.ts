@@ -1,7 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { join } from "node:path";
 import { exists, mkdir, rm, readFile, writeFile } from "node:fs/promises";
-import plugin from "../plugin.ts";
+import plugin from "../src/plugin.ts";
 import { detectAurelia, detectOptionalSkills, install } from "../src/installer.ts";
 import { snapshotDirectory } from "./snapshot.ts";
 import {
