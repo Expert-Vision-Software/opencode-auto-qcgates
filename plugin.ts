@@ -100,8 +100,10 @@ async function ensureScopeAssets(client: PluginClient, scope: Scope, directory: 
   return result;
 }
 
+const cacheCleaner = new CacheCleaner();
+
 function getCacheDirDisplay(packageName: string, packageVersion: string): string {
-  return `${new CacheCleaner().packagesCacheRootDisplay()}/${packageName}@${packageVersion}`;
+  return `${cacheCleaner.packagesCacheRootDisplay()}/${packageName}@${packageVersion}`;
 }
 
 async function buildFailureMessage(error: unknown): Promise<string> {

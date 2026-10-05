@@ -139,17 +139,20 @@ export class PluginConfigEditor {
 
   private candidateConfigs(options: PluginConfigOptions): CandidateConfig[] {
     const scopeBase = this.scopeBase(options.scope, options.projectDir);
-    const configs: CandidateConfig[] = [];
     if (options.scope === "local") {
-      configs.push({ path: join(scopeBase, "opencode.json"), lenient: false, writable: true });
-      configs.push({ path: join(scopeBase, "opencode.jsonc"), lenient: true, writable: true });
-      configs.push({ path: join(options.projectDir, "opencode.json"), lenient: false, writable: false });
-      configs.push({ path: join(options.projectDir, "opencode.jsonc"), lenient: true, writable: false });
-    } else {
-      configs.push({ path: join(scopeBase, "opencode.json"), lenient: false, writable: true });
-      configs.push({ path: join(scopeBase, "opencode.jsonc"), lenient: true, writable: true });
+      return [
+        ...PluginConfigEditor.configPair(scopeBase, true),
+        ...PluginConfigEditor.configPair(options.projectDir, false),
+      ];
     }
-    return configs;
+    return PluginConfigEditor.configPair(scopeBase, true);
+  }
+
+  private static configPair(base: string, writable: boolean): CandidateConfig[] {
+    return [
+      { path: join(base, "opencode.json"), lenient: false, writable },
+      { path: join(base, "opencode.jsonc"), lenient: true, writable },
+    ];
   }
 
   private async readCandidates(options: PluginConfigOptions): Promise<CandidateRead[]> {

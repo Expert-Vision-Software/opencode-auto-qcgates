@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { access, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { isValidOptionalDepEntry, type InstallOptionalDep } from "./optional-deps.ts";
 
@@ -110,11 +110,20 @@ export class InstallManifest {
       return false;
     }
     for (const entry of this.contents.files) {
-      if ((await InstallManifest.hashFile(join(configBase, entry.path))) === null) {
+      if (!(await InstallManifest.fileExists(join(configBase, entry.path)))) {
         return false;
       }
     }
     return true;
+  }
+
+  private static async fileExists(path: string): Promise<boolean> {
+    try {
+      await access(path);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async disposition(
