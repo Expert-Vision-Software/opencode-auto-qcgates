@@ -5,7 +5,6 @@ import { uninstallCommand } from "./commands/uninstall.ts";
 import { statusCommand } from "./commands/status.ts";
 import { CacheCleaner } from "./cache-cleaner.ts";
 import { ClearCacheUsageError } from "./clear-cache-usage-error.ts";
-import { CopyModeUnsupportedError } from "./copy-mode-unsupported-error.ts";
 import type { InstallMode, Scope } from "./installer.ts";
 
 const pkg = JSON.parse(
@@ -45,6 +44,17 @@ Examples:
 
 function isInstallMode(value: string): value is InstallMode {
   return value === "copy" || value === "plugin";
+}
+
+function parseMode(value: string | undefined): InstallMode | null {
+  if (value === undefined) {
+    return null;
+  }
+  if (isInstallMode(value)) {
+    return value;
+  }
+  console.error(`Invalid mode: ${value}. Must be "copy" or "plugin".`);
+  process.exit(1);
 }
 
 async function clearCacheCommand(): Promise<void> {
@@ -119,20 +129,10 @@ async function main(): Promise<void> {
   const scope: Scope | undefined = values.scope as Scope | undefined;
   const force: boolean = values.force;
   const migrate: boolean = values.migrate;
-  const mode: InstallMode | null =
-    values.mode === undefined
-      ? null
-      : isInstallMode(values.mode)
-        ? values.mode
-        : ("invalid" as InstallMode);
+  const mode: InstallMode | null = parseMode(values.mode);
 
   if (scope && scope !== "local" && scope !== "global") {
     console.error(`Invalid scope: ${scope}. Must be "local" or "global".`);
-    process.exit(1);
-  }
-
-  if (mode === ("invalid" as InstallMode)) {
-    console.error(`Invalid mode: ${values.mode}. Must be "copy" or "plugin".`);
     process.exit(1);
   }
 
@@ -162,10 +162,6 @@ async function main(): Promise<void> {
         process.exit(1);
     }
   } catch (error) {
-    if (error instanceof CopyModeUnsupportedError || error instanceof ClearCacheUsageError) {
-      console.error(`Error: ${error.message}`);
-      process.exit(1);
-    }
     const message = error instanceof Error ? error.message : String(error);
     console.error(`Error: ${message}`);
     process.exit(1);
