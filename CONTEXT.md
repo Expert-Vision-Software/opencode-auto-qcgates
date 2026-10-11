@@ -36,6 +36,10 @@ _Avoid_: baseline id, version, label
 One historical record tied to a Baseline Marker — date plus an auto-generated summary of which thresholds were crossed. Pruned FIFO to 10 entries.
 _Avoid_: log entry, history item
 
+**Inline Baseline Update**:
+The baseline update `eval` performs in the same run when the evaluation is PASS and a threshold is exceeded — it reuses the metrics just captured instead of re-executing the build and tests. The standalone `update` command is the manual escape hatch for every other case.
+_Avoid_: implicit update, auto-baseline
+
 ### Evaluation
 
 **Pass Criteria**:

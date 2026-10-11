@@ -131,7 +131,7 @@ If the template ships placeholders like `<Project name="Backend.Tests">`, replac
 
 ### `eval` — Evaluate Against Baseline (default)
 
-Compares current execution against the existing baseline.
+Compares current execution against the existing baseline, and **updates the baseline inline whenever the run qualifies**.
 
 1. Locate the protocol and baseline files (see *Locating the Consumer Files*).
 2. Read `testing-protocol.md` for workflow stages, thresholds, and pass/fail criteria.
@@ -139,27 +139,40 @@ Compares current execution against the existing baseline.
 4. **Capture the build-artifact metrics for every tier** (file count, total MB, gzipped KB on critical files, build time, lint-warning categories). Skipping these means the eval is incomplete — an eval without artefact metrics is *not* "no change in artefacts", it's "artefacts not measured".
 5. Compare metrics against baseline; apply threshold rules. **Artifact-size threshold compares every captured file**, not just `TotalSizeMB` — a single critical-file doubling silently breaks the budget if you only sum.
 6. Report status, deltas, and violations. Include the **Build-artifact summary** from Stage 3.
+7. **Update inline when the run qualifies.** The run must be PASS, at least one metric must exceed its threshold (step 5), **and step 4 must have captured build-artifact metrics** — an eval that skipped artefact capture is incomplete, not update-eligible. When all three hold, perform the update immediately, in this same run, from the metrics you just captured:
+
+   - Run the full `update` workflow below (increment the Baseline Marker, append the Changelog Entry, refresh the per-tier artefact blocks, prune the changelog FIFO to 10, stamp `LastUpdated`). The artefact fields are never dropped.
+   - **Reuse the captured metrics. Do NOT re-run the build or the tests.** The update consumes what steps 3–4 measured; a re-execution is exactly what this inline step exists to avoid.
+   - Report the new Baseline Marker with the deltas, so the reader sees the baseline moved.
+
+   A PASS run with no threshold exceeded does **not** update — report "within threshold". A FAIL run never updates; the stop-failure protocol applies.
+
+**Single-turn contract (subagents).** Steps 1–7 complete inside one agent turn. When `eval` runs as a subagent, the same invocation that captures the metrics also writes the baseline, so the captured metrics, the resolved tier set, and the protocol/baseline locations stay in context across the update. Never hand the update to a follow-up invocation: a fresh subagent has no memory of the captured numbers and would re-execute the build and tests to rebuild them.
 
 **When to use:** Default behavior. Run after every meaningful change to the consumer code or documents.
 
-### `update` — Conditional Baseline Update
+### `update` — Manual Baseline Update (escape hatch)
 
-Updates the baseline only when **both** conditions hold:
+`eval` already runs this workflow inline whenever it qualifies, so an ordinary PASS-with-threshold-exceeded run needs no separate command. `update` is the **manual escape hatch** for everything the user explicitly asks for outside that path:
 
-- Current run is PASS (zero failures, no build/validate errors, no lint errors)
-- At least one metric exceeds its threshold (so the update represents a real shift, not noise)
-- **The eval captured build-artifact metrics.** If artefacts were skipped, do not update — re-run the eval with artefacts measured first. The updated baseline must never drop artefact fields.
+- **Re-baselining a FAIL.** The run failed, the metrics genuinely moved (a deliberate behavior change, an accepted coverage drop), and the user wants the new numbers to become the reference instead of fixing back to the old ones.
+- **Forcing a fresh baseline.** The user wants the current state captured as the new reference regardless of thresholds — after tightening a threshold, restructuring tiers, or recovering when a qualifying eval's inline update did not complete.
+- **Accepting specific numbers.** The user inspected a run and approves exactly those numbers.
+
+Because this command can bless a FAIL or bypass thresholds, it never fires on its own: require an explicit user request, and **state what is being accepted before writing** (which checks failed, which metrics moved). This is the human-approval step of the stop-failure protocol carried through — a manual re-baseline never silently follows a FAIL. One rule is non-negotiable in every case: **the applicable eval must have captured build-artifact metrics.** If artefacts were skipped, run the `eval` (which captures them) first; a baseline update that omits artefact fields is invalid.
 
 Workflow:
 
 1. Increment the baseline marker (`BL-001` → `BL-002`, etc.)
-2. Generate a one-sentence changelog summary naming which thresholds crossed — **include the artefacts if they are the trigger** (e.g. "Frontend entry chunk gzipped grew from 188 KB to 312 KB, +66% ▲▲, exceeds the 10% artefact-size threshold").
+2. Generate a one-sentence changelog summary naming which thresholds crossed — **include the artefacts if they are the trigger** (e.g. "Frontend entry chunk gzipped grew from 188 KB to 312 KB, +66% ▲▲, exceeds the 10% artefact-size threshold"). On a FAIL re-baseline or a forced update, say so (e.g. "Re-baselined accepted FAIL: coverage 78% → 71%").
 3. Append a new `<Changelog><Entry>`; **never modify prior entries**
 4. Write the per-tier `<Build>` (backend) or `<BuildArtifacts>` (frontend, or any tier with an output directory) block with the captured metrics — this is non-negotiable; a baseline update that omits artefact fields is invalid.
 5. Prune the changelog to the last 10 entries (FIFO)
 6. Update `<Metadata.LastUpdated>` and write the file
 
-**When to use:** When the user explicitly requests a baseline update after confirming the new numbers are acceptable.
+Metrics source: in the inline case they come from the `eval` that just ran, in context. In the manual case, reuse the most recent `eval`'s captured metrics while they are still in context; otherwise run a fresh `eval` first and update from that — never invent numbers.
+
+**When to use:** Only on an explicit user request outside a qualifying `eval` — accepting a FAIL's new metrics, forcing a fresh baseline, or approving numbers the user inspected. A qualifying `eval` already handled the ordinary case; do not invoke `update` after it.
 
 ## Pass Criteria
 
@@ -211,8 +224,8 @@ Apply the protocol's `pass_fail_criteria` and `baseline_thresholds`. Produce:
 
 ```
 IF test_result == PASS AND threshold_exceeded == TRUE:
-    → UPDATE baseline
-    → Report metrics with deltas
+    → UPDATE baseline INLINE (this run — reuse captured metrics; do NOT re-execute build/tests)
+    → Report metrics with deltas and the new Baseline Marker
 ELIF test_result == PASS AND threshold_exceeded == FALSE:
     → NO UPDATE needed; report "within threshold"
 ELIF test_result == FAIL:
@@ -259,7 +272,7 @@ Every eval reports:
 - **Threshold evaluation**: which metrics exceeded — **artefact deltas surface alongside test deltas, never buried**
 - **Delta from baseline**: +/- change per metric
 - **Build-artifact summary**: one line per tier (`TierName: N files, M MB total, K ms critical-file gzipped; lint warnings by category: a:0, b:2`)
-- **Recommendation**: update baseline (if applicable), or fix required
+- **Baseline action**: when the run qualified, the update that just happened (and the new `BL-NNN` marker); otherwise "within threshold — no update"; on FAIL, the fix required
 
 ## Stop-Failure Protocol
 
@@ -291,10 +304,11 @@ This skill is tier-agnostic. Implementation adapts to whatever tiers and tools t
 
 OpenCode-specific bindings for this skill:
 
-- **Slash command** — `/test-baseline init|eval|update` routes to the `task` agent (`agent: task` in the command frontmatter). The command body loads this skill via the `loadSkill` tool.
+- **Slash command** — `/test-baseline init|eval|update` runs in the current agent's main conversation (`subtask: false` in the command frontmatter, so no subagent is spawned). The command body loads this skill via the `loadSkill` tool.
+- **Single-turn eval → update** — a qualifying `/test-baseline eval` evaluates and updates the baseline inside one agent turn (the single-turn contract above). Because the command stays in the main conversation, the captured metrics remain in context through the update, so no follow-up `update` command and no test re-execution is needed.
 - **Skill allowlist** — `src/plugin.ts` sets `agent.task.permission.skill["test-baselining"] = "allow"` so the task agent can reach this skill without a prompt.
 - **Optional skill chain** — `init` may invoke `loadSkill({ name: "grilling" })` when no manifest is present (A) or the inline tier grill fails to converge (B). The chain is best-effort; a missing skill falls through to the inline Step 2 table. `src/plugin.ts` adds `grilling` to `agent.task.permission.skill` alongside `test-baselining` and `regression-checking` — the entry is harmless if the skill isn't installed; OpenCode consults the allowlist only when the loadSkill tool is actually invoked.
 - **Install layout** — OpenCode's plugin harness copies this skill to `.opencode/skills/test-baselining/` (project) or `~/.config/opencode/skills/test-baselining/` (global). Idempotency is gated on the install manifest at `<configBase>/<package>.manifest.json`, which records the installed version and a per-file sha256 for each copied file: a version-and-hash match is a zero-write no-op, and files whose hash no longer matches (consumer edits) are preserved rather than overwritten.
 - **Asset reuse** — Both `test-baselining` and `regression-checking` are model-invoked skills (they each carry a `description`) so any subagent that loads them can chain the other. `regression-checking` calls `loadSkill({ name: "test-baselining" })` to reuse this skill's execution workflow.
 
-For non-OpenCode agents (Claude Code, etc.), the same `SKILL.md` and command markdown files work — the frontmatter fields OpenCode adds (`agent`, `subtask`) are ignored, and `loadSkill` resolves through the agent's own skill loader.
+For non-OpenCode agents (Claude Code, etc.), the same `SKILL.md` and command markdown files work — the frontmatter field OpenCode adds (`subtask`) is ignored, and `loadSkill` resolves through the agent's own skill loader.

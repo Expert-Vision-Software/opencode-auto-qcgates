@@ -1,6 +1,5 @@
 ---
-description: "Regression check workflow. Routes to the task agent; answers \"did we break anything?\", \"should I proceed or stop?\", \"is it safe to commit?\"."
-agent: "task"
+description: "Regression check workflow. Spawns a subagent; answers \"did we break anything?\", \"should I proceed or stop?\", \"is it safe to commit?\"."
 subtask: true
 ---
 
@@ -28,4 +27,4 @@ Usage:
 
 Reactive triggers: "did we break anything?", "should I proceed or stop?", "is it safe to commit?", "should I accept these changes?", "has quality improved or degraded?", "should I continue or fix regressions first?".
 
-The skill is agent-agnostic at the body level; the `agent: task` / `subtask: true` frontmatter above is OpenCode-specific binding. Other dot-agents agents see the command body and route it however their loader requires.
+The skill is agent-agnostic at the body level; the `subtask: true` frontmatter above is OpenCode-specific binding — it forces a subagent invocation so the regression check does not pollute the primary context. Other dot-agents agents see the command body and route it however their loader requires.

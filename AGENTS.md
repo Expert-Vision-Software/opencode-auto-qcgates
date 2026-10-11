@@ -14,8 +14,8 @@ bun test        # Run unit tests
 | Command | Description |
 |---------|-------------|
 | `/test-baseline init` | Grill for tiers, generate `testing-protocol.md`, capture first baseline (`BL-001`) |
-| `/test-baseline eval` | Compare current tests against baseline (DEFAULT) |
-| `/test-baseline update` | Update baseline if PASS + thresholds exceeded |
+| `/test-baseline eval` | Compare current tests against baseline; auto-updates the baseline when PASS + thresholds exceeded (DEFAULT) |
+| `/test-baseline update` | Manual escape hatch: re-baseline on request — accept a FAIL's new metrics, force a fresh baseline, or approve inspected numbers |
 | `/regression-check` | Answer quality questions (proactive or reactive) |
 
 ## Architecture
@@ -51,7 +51,7 @@ manifest.json                  # Optional-dependencies declaration (optionalDepe
 - **Universal install** — `src/plugin.ts` → `src/installer.ts` copies skills, commands, and agents to a dot-agents layout (`SKILL.md` per skill folder). Other agents consume them directly.
 - **OpenCode accommodation** — The harness additionally registers the plugin in `opencode.json`, sets the `agent.task.permission.skill` allowlist for both skills, and migrates a root `opencode.json` to `.opencode/opencode.json` when present. OpenCode's `loadSkill({ name })` tool resolves skills through the same layout.
 
-Skill bodies stay agent-agnostic. OpenCode-specific bindings live in a tail section of each `SKILL.md` and in the command frontmatter (`agent: task`, with a command-specific `subtask`: `false` for `/test-baseline`, `true` for `/regression-check`).
+Skill bodies stay agent-agnostic. OpenCode-specific bindings live in a tail section of each `SKILL.md` and in the command frontmatter (a command-specific `subtask`: `false` for `/test-baseline` so it stays in the main conversation, `true` for `/regression-check` so it spawns a subagent). Commands no longer pin an agent, so each runs under the current agent.
 
 ## Consumer Project Files
 
@@ -68,7 +68,7 @@ After `/test-baseline init`, two files appear at the consumer project root:
 
 ## Adding Commands or Skills
 
-- **New command:** Create `commands/<name>.md` with frontmatter `agent: task` and a command-appropriate `subtask` (`false` to run in the main conversation, e.g. `/test-baseline` for its grilling flow; `true` to spawn a task subagent, e.g. `/regression-check`) (OpenCode-specific — ignored by other agents). The body typically loads the corresponding skill.
+- **New command:** Create `commands/<name>.md` with a command-appropriate `subtask` (`false` to run in the current agent's main conversation, e.g. `/test-baseline` for its grilling flow; `true` to spawn a subagent, e.g. `/regression-check`) (OpenCode-specific — ignored by other agents). The body typically loads the corresponding skill.
 
 **New skill:** Create `skills/<name>/SKILL.md` with required frontmatter (`name`, `description`). Use a `templates/` subdirectory for files that should be copied to consumer projects. Body must be agent-agnostic; put any OpenCode-specific bindings in a tail `## OpenCode` section.
 
@@ -83,7 +83,7 @@ After `/test-baseline init`, two files appear at the consumer project root:
 - Changelog is append-only and FIFO-pruned to 10 entries
 - Changelog auto-generates summaries based on which thresholds were exceeded — **build-artifact deltas are first-class in the summary, never buried under test deltas**
 - `regression-checking` delegates to `test-baselining` and reads `testing-protocol.md` for threshold interpretation
-- Commands route to the task agent by default (clean isolation; OpenCode-only — other agents use their own routing)
+- Commands do not pin an agent; the frontmatter `subtask` drives routing — `false` keeps the command in the current agent's main conversation, `true` forces a subagent (OpenCode-only — other agents use their own routing)
 - Skill bodies are agent-agnostic; OpenCode bindings live in a tail section per skill
 - **`refs/` is reference, not policy.** Files under `skills/<name>/refs/` are bundled with the skill and copied to the consumer; the skill body consults them during guided flows (`init`, `Locating the Consumer Files`, `Caching Logic`) but they are explicitly *non-authoritative* — the consumer's `testing-protocol.md` is the truth once it is written. `source-controls.md` is always-relevant; `backends-ref.md` and `frontend-refs.md` are init-only.
 - **Skills are VCS-agnostic at the body level.** Git-specific wording is a stand-in; the lookup table lives in `refs/source-controls.md` and the agent consults it for the consumer's actual source control. Coverage: Git, Mercurial, Subversion, Pijul, Fossil, **Unity VCS** (Unity Version Control / Plastic SCM), Perforce, Bazaar, Darcs.

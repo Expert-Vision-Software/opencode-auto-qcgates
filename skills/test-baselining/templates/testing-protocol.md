@@ -1,6 +1,6 @@
 <critical_rules priority="highest">
 <pass_criteria>All tests pass (0 failures), no build errors, no linting errors</pass_criteria>
-<baseline_update>Update `@testing-baseline.xml` **ONLY** on PASS + threshold exceeded</baseline_update>
+<baseline_update>`eval` updates `@testing-baseline.xml` inline on PASS + threshold exceeded; the `update` command re-baselines on explicit request — including accepting a FAIL's genuinely-moved metrics or forcing a fresh baseline (always with captured build-artifact metrics)</baseline_update>
 <no_real_apis>**NEVER** call real external APIs in tests</no_real_apis>
 <domain_isolation>Domain tests: **ZERO** external dependencies, no mocks</domain_isolation>
 <stop_on_failure>STOP immediately on test failure → REPORT → PLAN → APPROVAL → FIX</stop_on_failure>
@@ -74,7 +74,7 @@ Record coverage from terminal; re-record build-artifact metrics (file count, tot
 </stage>
 
 <stage name="Baseline">
-If PASS + threshold met → Update `@testing-baseline.xml`
+If PASS + threshold met → `eval` updates `@testing-baseline.xml` inline and reports the new Baseline Marker
 **Do NOT modify this protocol file with results**
 </stage>
 </execution_workflow>
@@ -162,6 +162,8 @@ If PASS + threshold met → Update `@testing-baseline.xml`
 | PASS | FAIL | FAIL | No |
 | FAIL | PASS | PASS | Yes (recovery) |
 | FAIL | FAIL | FAIL | No |
+
+The `update` command overrides this matrix on an explicit user request — accepting a FAIL's new metrics as the reference, or forcing a fresh baseline. It still requires captured build-artifact metrics and records what was accepted in the changelog entry.
 </decision_matrix>
 </baseline_thresholds>
 

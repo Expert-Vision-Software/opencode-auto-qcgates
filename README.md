@@ -178,9 +178,9 @@ Test execution and baseline management.
 
 | Subcommand | Description |
 |------------|-------------|
-| `eval` | Compare current tests against baseline (DEFAULT) |
+| `eval` | Compare current tests against baseline, auto-updating it when the run is PASS and a threshold is crossed (DEFAULT) |
 | `init` | Grill for tiers, generate `testing-protocol.md`, capture first baseline (`BL-001`) |
-| `update` | Update baseline when PASS and thresholds crossed |
+| `update` | Manual escape hatch: re-baseline on request — accept a FAIL's new metrics, force a fresh baseline, or approve inspected numbers |
 
 ### `/regression-check`
 

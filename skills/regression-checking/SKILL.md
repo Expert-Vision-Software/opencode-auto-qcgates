@@ -61,6 +61,9 @@ These question patterns activate the skill:
    and flag the fallback in the output.)
 
 2. Load test-baselining (via the agent's skill loader) and run `eval`
+   - `eval` auto-updates the baseline inline when the run is PASS and a threshold
+     is exceeded (test-baselining's single-turn contract). This check interprets
+     the deltas captured by that run; the inline update changes no decision signal.
 
 3. Read testing-protocol.md for thresholds and pass/fail criteria
    - Use the location rules from test-baselining's "Locating the Consumer Files"
@@ -179,7 +182,7 @@ Use visual indicators:
 
 OpenCode-specific bindings for this skill:
 
-- **Slash command** — `/regression-check` (or `/regression-check status` for a quick check without a full eval) routes to the `task` agent (`agent: task` in the command frontmatter). The command body loads this skill via the `loadSkill` tool.
+- **Slash command** — `/regression-check` (or `/regression-check status` for a quick check without a full eval) forces a subagent invocation (`subtask: true` in the command frontmatter). The command body loads this skill via the `loadSkill` tool.
 - **Skill allowlist** — `src/plugin.ts` sets `agent.task.permission.skill["regression-checking"] = "allow"` so the task agent can reach this skill without a prompt.
 - **Skill chain** — OpenCode's `loadSkill({ name: "test-baselining" })` call inside this skill reuses the same install location and permission allowlist, so the chain works without extra config.
 - **Install layout** — OpenCode's plugin harness copies this skill to `.opencode/skills/regression-checking/` (project) or `~/.config/opencode/skills/regression-checking/` (global). Idempotency is gated on the install manifest at `<configBase>/<package>.manifest.json`, which records the installed version and a per-file sha256 for each copied file: a version-and-hash match is a zero-write no-op, and files whose hash no longer matches (consumer edits) are preserved rather than overwritten.
