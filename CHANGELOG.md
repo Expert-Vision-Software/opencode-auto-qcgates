@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **v2-native plugin definition** — `src/plugin.ts` now exports `Plugin.define({ id, effect })` built with `@opencode/plugin/effect` (the v1 factory/hooks shape fails to load under an OpenCode v2 host). The launch directory comes from `context.location.directory`; the effect's error channel stays `never` (ADR 0007): any failure degrades to a single console-warn advisory naming the remediation command and the package-qualified `opencode/npm` cache path. Permission seeding writes the v2 ordered ruleset array on the task agent (`permissions: [{ action: "skill", resource, effect: "allow" }]`) instead of the v1 `permission.skill` keyed record, preserving foreign rules. The v1 in-memory local-overrides merge is dropped — the v2 host merges config roots itself.
+- **v2 `plugins` config key** — Registration detection, writes, splices, and default templates target the v2 `plugins` array; the legacy singular `plugin` key is tolerated read-only with a one-shot upgrade advisory and never counts as registered under v2. Splices fix a hardcoded key-length offset that blocked splicing into an existing array. README and installer advisory snippets use `plugins`, never the singular key. Up-to-date checks require the `plugins` entry.
+- **Declared exports map** — `package.json` now declares `exports` with both `"."` and `"./server"` pointing at `./index.ts`; OpenCode v2 resolves the plugin entrypoint through `./server` on every runtime, and the closed allowlist keeps bare-name imports working instead of relying on the runtime-dependent root-index fallback.
+- **Cache root corrected** — Cache hygiene (prune, `clear-cache`, and the cache-rot advisory path) now targets OpenCode's actual npm plugin cache (`$XDG_CACHE_HOME/opencode/npm`, falling back to `~/.cache/opencode/npm`) instead of the never-used `opencode/packages` directory, making pruning and the advisory effective.
+- **Path-form registrations recognized** — `PluginEntryResolver` (src/plugin-entry.ts): a `file://` URL or filesystem path entry (string or `{ package }` object form) resolving to this package counts as a semantic match — no duplicate `name@latest` is written beside a live path entry; matching is read-only and cwd-independent.
+
+### Dependencies
+- Add `@opencode/plugin` (`latest`) and `effect` (aligned to the authoring package's `4.0.0-rc.112` so a single Effect copy resolves tree-wide; forcing stable `4.0.2` breaks `@opencode/schema` at runtime); remove `@opencode-ai/plugin`.
+
 ## [1.7.0] - 2026-10-05
 
 ### Added
