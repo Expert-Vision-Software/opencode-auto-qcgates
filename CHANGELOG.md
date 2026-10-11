@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Dependencies
 - Add `@opencode/plugin` (`latest`) and `effect` (aligned to the authoring package's `4.0.0-rc.112` so a single Effect copy resolves tree-wide; forcing stable `4.0.2` breaks `@opencode/schema` at runtime); remove `@opencode-ai/plugin`.
 
-## [Unreleased]
+## [1.8.1] - 2026-10-11
 
 ### Changed
 - **`eval` updates the baseline inline** — `/test-baseline eval` now performs the conditional baseline update in the same run when the evaluation is PASS and a threshold is exceeded, reusing the metrics it just captured instead of requiring a separate `/test-baseline update` invocation that would re-execute the build and tests. The inline path runs the full update workflow (Baseline Marker increment, Changelog Entry, mandatory per-tier artefact blocks, FIFO prune to 10, `LastUpdated`) inside a single agent turn, so no context is lost between evaluation and update. A PASS run with no threshold exceeded, and any FAIL run, still never modify the baseline. `/test-baseline update` remains as the manual escape hatch for re-baselining outside a qualifying eval: accepting a FAIL's genuinely-moved metrics as the new reference, forcing a fresh baseline regardless of thresholds, or approving numbers the user inspected — always on an explicit request, and never without captured build-artifact metrics. `CONTEXT.md` gains the **Inline Baseline Update** term, and the `test-baselining` skill, `regression-checking` execution flow, command docs, README, and `AGENTS.md`/`docs/agents/domain.md` are updated to match.
