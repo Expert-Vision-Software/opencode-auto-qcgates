@@ -490,6 +490,26 @@ describe("TestBaseliningPlugin", () => {
     const registry = await invokeLoadCycle("task-ruleset", TEST_DIR);
     expectSkillPermissions(registry);
   });
+
+  test("a consumer's explicit skill rule survives seeding untouched", async () => {
+    const registry = makeAgentRegistry();
+    const task = registry.agents.find((agent) => agent.id === "task");
+    task?.permissions.push({ action: "skill", resource: "test-baselining", effect: "deny" });
+
+    const module = await loadPluginSession("task-ruleset-consumer-deny");
+    await runLoadCycle(module.default, TEST_DIR, registry);
+
+    const denyRules = registry.agents
+      .find((agent) => agent.id === "task")
+      ?.permissions.filter((rule) => rule.action === "skill" && rule.resource === "test-baselining");
+    expect(denyRules).toHaveLength(1);
+    expect(denyRules?.[0]?.effect).toBe("deny");
+
+    const seeded = registry.agents
+      .find((agent) => agent.id === "task")
+      ?.permissions.filter((rule) => rule.action === "skill" && rule.effect === "allow");
+    expect(seeded?.map((rule) => rule.resource).sort()).toEqual(["grilling", "regression-checking"]);
+  });
 });
 
 interface ReproScenario {

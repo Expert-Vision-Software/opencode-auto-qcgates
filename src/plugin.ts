@@ -90,9 +90,11 @@ function advisoryEffect(run: () => Promise<void>): Effect.Effect<void, never> {
 }
 
 function mergeTaskSkillRules(existing: ReadonlyArray<PermissionRule>): PermissionRule[] {
-  const owned = new Set(TASK_SKILL_RESOURCES);
-  const preserved = existing.filter((rule) => !(rule.action === "skill" && owned.has(rule.resource)));
-  return [...preserved, ...TASK_SKILL_RULES];
+  const ruledResources = new Set(
+    existing.filter((rule) => rule.action === "skill").map((rule) => rule.resource)
+  );
+  const unruled = TASK_SKILL_RULES.filter((rule) => !ruledResources.has(rule.resource));
+  return [...existing, ...unruled];
 }
 
 function seedTaskSkillPermissions(context: Plugin.Context): Effect.Effect<void, never, Scope.Scope> {

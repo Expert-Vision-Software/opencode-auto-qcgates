@@ -92,7 +92,7 @@ _Avoid_: install hint, banner, tip
 
 **Registration**:
 The consumer's act of listing the package in an opencode config's `plugin` array — global or project-scoped. Registration is what triggers the plugin; it is distinct from installation.
-_Avoid_: plugin entry, activation
+_Avoid_: plugin entry, activation — except where the opencode-architect suite's package contract fixes the identifier (`PluginEntryResolver`, `src/plugin-entry.ts`).
 
 **Self-Ensure**:
 The plugin's on-load behavior of copying its Skill Assets into the config dir of each scope where it is registered, so config-entry installs need no separate installer run.

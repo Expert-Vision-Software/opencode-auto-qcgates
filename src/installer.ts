@@ -941,15 +941,3 @@ export async function readLocalConfig(projectDir: string): Promise<Record<string
   }
   return config;
 }
-
-export function mergeConfigWithOverrides(
-  input: Record<string, unknown>,
-  localConfig: Record<string, unknown>
-): void {
-  for (const [key, value] of Object.entries(localConfig)) {
-    if (key === "plugin" || key === "plugins" || key === "agent") {
-      continue;
-    }
-    input[key] = value;
-  }
-}
