@@ -2,6 +2,7 @@ import { exists, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { PluginNameNormalizer } from "./plugin-name.ts";
+import { legacyPluginKeyAdvisor } from "./legacy-config-advisory.ts";
 
 export type ConfigScope = "local" | "global";
 
@@ -32,6 +33,7 @@ interface CandidateRead {
   candidate: CandidateConfig;
   text: string;
   plugins: string[] | null;
+  legacyPlugins: string[];
 }
 
 interface PluginArrayRange {
@@ -39,9 +41,11 @@ interface PluginArrayRange {
   bracketEnd: number;
 }
 
+const PLUGIN_ARRAY_KEY = '"plugins"';
+
 const DEFAULT_CONFIG_TEMPLATE = `{
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["__PACKAGE_NAME__"]
+  "plugins": ["__PACKAGE_NAME__"]
 }
 `;
 
@@ -52,6 +56,7 @@ export class PluginConfigEditor {
   ): Promise<EnsurePluginEntryOutcome> {
     const canonical = PluginNameNormalizer.canonicalize(packageName);
     const reads = await this.readCandidates(options);
+    this.adviseLegacyRegistrations(reads, packageName);
 
     for (const { candidate, plugins } of reads) {
       if (plugins !== null && this.hasMatchingEntry(plugins, packageName)) {
@@ -126,6 +131,14 @@ export class PluginConfigEditor {
     return { action: "noop", configPath: null, warning: null };
   }
 
+  private adviseLegacyRegistrations(reads: CandidateRead[], packageName: string): void {
+    for (const { candidate, legacyPlugins } of reads) {
+      if (legacyPlugins.some(entry => PluginNameNormalizer.matches(entry, packageName))) {
+        legacyPluginKeyAdvisor.advise(candidate.path, packageName);
+      }
+    }
+  }
+
   private hasMatchingEntry(entries: string[], packageName: string): boolean {
     return entries.some(entry => PluginNameNormalizer.matches(entry, packageName));
   }
@@ -163,10 +176,11 @@ export class PluginConfigEditor {
       }
       const text = await readFile(candidate.path, "utf-8");
       const plugins = this.parsePluginArray(text, candidate.lenient);
+      const legacyPlugins = plugins === null ? [] : this.parseLegacyPluginArray(text, candidate.lenient);
       if (plugins === null) {
         console.warn(`Warning: ${this.parseFailureWarning(candidate.path)}`);
       }
-      reads.push({ candidate, text, plugins });
+      reads.push({ candidate, text, plugins, legacyPlugins });
     }
     return reads;
   }
@@ -194,11 +208,22 @@ export class PluginConfigEditor {
     if (config === null) {
       return null;
     }
-    const plugins = config["plugin"];
-    if (!Array.isArray(plugins)) {
+    return this.stringEntries(config["plugins"]);
+  }
+
+  private parseLegacyPluginArray(text: string, lenient: boolean): string[] {
+    const config = this.parseConfig(text, lenient);
+    if (config === null) {
       return [];
     }
-    return plugins.filter((entry): entry is string => typeof entry === "string");
+    return this.stringEntries(config["plugin"]);
+  }
+
+  private stringEntries(value: unknown): string[] {
+    if (!Array.isArray(value)) {
+      return [];
+    }
+    return value.filter((entry): entry is string => typeof entry === "string");
   }
 
   private parseConfig(text: string, lenient: boolean): Record<string, unknown> | null {
@@ -450,8 +475,8 @@ export class PluginConfigEditor {
     const leadingWhitespace = rest.slice(0, nextContentOffset);
     const isClosingBrace = rest[nextContentOffset] === "}";
     const property = isClosingBrace
-      ? `"plugin": ["${canonicalEntry}"]`
-      : `"plugin": ["${canonicalEntry}"],`;
+      ? `"plugins": ["${canonicalEntry}"]`
+      : `"plugins": ["${canonicalEntry}"],`;
     const separator = isClosingBrace ? "" : leadingWhitespace;
     return text.slice(0, insertAt) + property + separator + text.slice(insertAt);
   }
@@ -459,12 +484,12 @@ export class PluginConfigEditor {
   private findPluginArrayRange(navigable: string): PluginArrayRange | null {
     let searchFrom = 0;
     while (searchFrom < navigable.length) {
-      const keyIndex = navigable.indexOf('"plugin"', searchFrom);
+      const keyIndex = navigable.indexOf(PLUGIN_ARRAY_KEY, searchFrom);
       if (keyIndex === -1) {
         return null;
       }
       if (this.precededByStructuralChar(navigable, keyIndex, ["{", ","])) {
-        const colonIndex = this.nextOutsideString(navigable, keyIndex + 8, ":");
+        const colonIndex = this.nextOutsideString(navigable, keyIndex + PLUGIN_ARRAY_KEY.length, ":");
         if (colonIndex !== -1) {
           const bracketStart = this.nextOutsideString(navigable, colonIndex + 1, "[");
           if (bracketStart !== -1) {

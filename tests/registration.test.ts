@@ -17,19 +17,19 @@ async function makeFixture(name: string): Promise<string> {
   return fixtureDir;
 }
 
-async function writeNestedRepoConfig(fixtureDir: string, plugin: string[]): Promise<void> {
+async function writeNestedRepoConfig(fixtureDir: string, plugins: string[]): Promise<void> {
   const localDir = join(fixtureDir, ".opencode");
   await mkdir(localDir, { recursive: true });
   await writeFile(
     join(localDir, "opencode.json"),
-    JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin }, null, 2)
+    JSON.stringify({ $schema: "https://opencode.ai/config.json", plugins }, null, 2)
   );
 }
 
-async function writeRootRepoConfig(fixtureDir: string, plugin: string[]): Promise<void> {
+async function writeRootRepoConfig(fixtureDir: string, plugins: string[]): Promise<void> {
   await writeFile(
     join(fixtureDir, "opencode.json"),
-    JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin }, null, 2)
+    JSON.stringify({ $schema: "https://opencode.ai/config.json", plugins }, null, 2)
   );
 }
 
@@ -117,7 +117,7 @@ describe("RegistrationDetector.detect", () => {
       await mkdir(SANDBOX_GLOBAL_BASE, { recursive: true });
       await writeFile(
         join(SANDBOX_GLOBAL_BASE, "opencode.jsonc"),
-        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: [PACKAGE_NAME] }, null, 2)
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugins: [PACKAGE_NAME] }, null, 2)
       );
       const fixtureDir = await makeFixture("global-jsonc");
       await expectContext(fixtureDir, "global");
@@ -130,7 +130,7 @@ describe("RegistrationDetector.detect", () => {
       const fixtureDir = await makeFixture("repo-root-jsonc");
       await writeFile(
         join(fixtureDir, "opencode.jsonc"),
-        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: [PACKAGE_NAME] }, null, 2)
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugins: [PACKAGE_NAME] }, null, 2)
       );
       await expectContext(fixtureDir, "repo-local");
     });
@@ -144,7 +144,7 @@ describe("RegistrationDetector.detect", () => {
       await mkdir(localDir, { recursive: true });
       await writeFile(
         join(localDir, "opencode.jsonc"),
-        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: [PACKAGE_NAME] }, null, 2)
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugins: [PACKAGE_NAME] }, null, 2)
       );
       await expectContext(fixtureDir, "repo-local");
     });
@@ -156,7 +156,7 @@ describe("RegistrationDetector.detect", () => {
       await mkdir(SANDBOX_GLOBAL_BASE, { recursive: true });
       await writeFile(
         join(SANDBOX_GLOBAL_BASE, "opencode.jsonc"),
-        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: [PACKAGE_NAME] }, null, 2)
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugins: [PACKAGE_NAME] }, null, 2)
       );
       const fixtureDir = await makeFixture("both-jsonc-global");
       await writeNestedRepoConfig(fixtureDir, [PACKAGE_NAME]);
@@ -183,7 +183,7 @@ describe("RegistrationDetector.detect", () => {
   test("detects a jsonc registration whose line comment sits between the trailing comma and the array closer", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
-      const content = `{\n  "plugin": [\n    "${PACKAGE_NAME}", // trailing comment\n  ]\n}`;
+      const content = `{\n  "plugins": [\n    "${PACKAGE_NAME}", // trailing comment\n  ]\n}`;
       const fixtureDir = await makeFixture("jsonc-array-line-comment");
       const jsoncPath = join(fixtureDir, "opencode.jsonc");
       await writeFile(jsoncPath, content);
@@ -195,7 +195,7 @@ describe("RegistrationDetector.detect", () => {
   test("detects a jsonc registration whose block comment sits between the trailing comma and the array closer", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
-      const content = `{\n  "plugin": [\n    "${PACKAGE_NAME}", /* trailing comment */\n  ]\n}`;
+      const content = `{\n  "plugins": [\n    "${PACKAGE_NAME}", /* trailing comment */\n  ]\n}`;
       const fixtureDir = await makeFixture("jsonc-array-block-comment");
       const jsoncPath = join(fixtureDir, "opencode.jsonc");
       await writeFile(jsoncPath, content);
@@ -208,8 +208,8 @@ describe("RegistrationDetector.detect", () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       const contents = [
-        `{\n  "plugin": ["${PACKAGE_NAME}"], // trailing comment\n}`,
-        `{\n  "plugin": ["${PACKAGE_NAME}"], /* trailing comment */\n}`,
+        `{\n  "plugins": ["${PACKAGE_NAME}"], // trailing comment\n}`,
+        `{\n  "plugins": ["${PACKAGE_NAME}"], /* trailing comment */\n}`,
       ];
 
       for (const [index, content] of contents.entries()) {
@@ -226,7 +226,7 @@ describe("RegistrationDetector.detect", () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       const content =
-        `{\n  "plugin": ["${PACKAGE_NAME}"],\n` +
+        `{\n  "plugins": ["${PACKAGE_NAME}"],\n` +
         `  "note": "escaped quote \\" then // slashes, and a } brace"\n}`;
       const fixtureDir = await makeFixture("jsonc-string-awareness");
       const jsoncPath = join(fixtureDir, "opencode.jsonc");
@@ -249,6 +249,70 @@ async function expectJsoncRegistration(fixtureDir: string, jsoncPath: string, co
     warn.mockRestore();
   }
 }
+
+describe("legacy singular plugin key detection", () => {
+  test("a legacy-only singular plugin entry does not count as registered", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("legacy-nested-unregistered");
+      const localDir = join(fixtureDir, ".opencode");
+      await mkdir(localDir, { recursive: true });
+      await writeFile(join(localDir, "opencode.json"), `{\n  "plugin": ["${PACKAGE_NAME}"]\n}\n`);
+
+      const warnings: string[] = [];
+      const warn = spyOn(console, "warn").mockImplementation((message: unknown) => {
+        warnings.push(String(message));
+      });
+      try {
+        await expectContext(fixtureDir, "none");
+      } finally {
+        warn.mockRestore();
+      }
+      expect(warnings.join("\n")).toContain("legacy and inert under OpenCode v2");
+    });
+  });
+
+  test("a legacy-only global registration leaves detection at none", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      await mkdir(SANDBOX_GLOBAL_BASE, { recursive: true });
+      await writeFile(join(SANDBOX_GLOBAL_BASE, "opencode.json"), `{\n  "plugin": ["${PACKAGE_NAME}"]\n}\n`);
+      const fixtureDir = await makeFixture("legacy-global-unregistered");
+      const warn = spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        await expectContext(fixtureDir, "none");
+      } finally {
+        warn.mockRestore();
+      }
+    });
+  });
+
+  test("a legacy-only config triggers the upgrade advisory once across repeated detection", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("legacy-detect-advisory-once");
+      const localDir = join(fixtureDir, ".opencode");
+      await mkdir(localDir, { recursive: true });
+      const legacyPath = join(localDir, "opencode.json");
+      await writeFile(legacyPath, `{\n  "plugin": ["${PACKAGE_NAME}"]\n}\n`);
+
+      const warnings: string[] = [];
+      const warn = spyOn(console, "warn").mockImplementation((message: unknown) => {
+        warnings.push(String(message));
+      });
+      try {
+        await expectContext(fixtureDir, "none");
+        await expectContext(fixtureDir, "none");
+      } finally {
+        warn.mockRestore();
+      }
+      const advisories = warnings.filter(w => w.includes("legacy and inert under OpenCode v2"));
+      expect(advisories.length).toBe(1);
+      expect(advisories[0]).toContain(legacyPath);
+      expect(await readFile(legacyPath, "utf-8")).toBe(`{\n  "plugin": ["${PACKAGE_NAME}"]\n}\n`);
+    });
+  });
+});
 
 describe("RegistrationDetector.scopesToEnsure", () => {
   test("maps each context to its managed scopes", () => {
@@ -319,12 +383,12 @@ describe("RegistrationDetector read-only hardening", () => {
       const localDir = join(fixtureDir, ".opencode");
       await mkdir(localDir, { recursive: true });
       const invalidContent =
-        '{\n  "$schema": "https://opencode.ai/config.json",\n  "plugin": [\n    "opencode-architect"\n  ],\n}';
+        '{\n  "$schema": "https://opencode.ai/config.json",\n  "plugins": [\n    "opencode-architect"\n  ],\n}';
       const invalidPath = join(localDir, "opencode.json");
       await writeFile(invalidPath, invalidContent);
       await writeFile(
         join(fixtureDir, "opencode.json"),
-        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: [PACKAGE_NAME] }, null, 2)
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugins: [PACKAGE_NAME] }, null, 2)
       );
 
       const warnings: string[] = [];

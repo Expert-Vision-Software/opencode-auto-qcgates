@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll, spyOn } from "bun:test";
 import { join } from "node:path";
 import { exists, mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import plugin from "../src/plugin.ts";
@@ -78,7 +78,7 @@ describe("TestBaseliningPlugin", () => {
       const configPath = join(fixtureDir, ".opencode", "opencode.json");
       await mkdir(join(fixtureDir, ".opencode"), { recursive: true });
       const configContent = JSON.stringify(
-        { $schema: "https://opencode.ai/config.json", model: "some/model", plugin: [PACKAGE_NAME] },
+        { $schema: "https://opencode.ai/config.json", model: "some/model", plugins: [PACKAGE_NAME] },
         null,
         2
       );
@@ -121,7 +121,7 @@ describe("TestBaseliningPlugin", () => {
         "  // pinned globally so every project gets the quality gates",
         '  "$schema": "https://opencode.ai/config.json",',
         '  "model": "some/model",',
-        '  "plugin": [',
+        '  "plugins": [',
         `    "${PACKAGE_NAME}@1.5.0",`,
         "  ],",
         "}",
@@ -148,7 +148,7 @@ describe("TestBaseliningPlugin", () => {
       const localDir = join(fixtureDir, ".opencode");
       await mkdir(localDir, { recursive: true });
       const jsoncContent = JSON.stringify(
-        { $schema: "https://opencode.ai/config.json", model: "some/model", plugin: [PACKAGE_NAME] },
+        { $schema: "https://opencode.ai/config.json", model: "some/model", plugins: [PACKAGE_NAME] },
         null,
         2
       );
@@ -236,7 +236,7 @@ describe("TestBaseliningPlugin", () => {
       const fixtureDir = await makeFixture("repo-root-registration");
       const rootConfigPath = join(fixtureDir, "opencode.json");
       const rootContent = JSON.stringify(
-        { $schema: "https://opencode.ai/config.json", model: "some/model", plugin: [PACKAGE_NAME] },
+        { $schema: "https://opencode.ai/config.json", model: "some/model", plugins: [PACKAGE_NAME] },
         null,
         2
       );
@@ -258,7 +258,7 @@ describe("TestBaseliningPlugin", () => {
       const fixtureDir = await makeFixture("global-context-root-foreign");
       const rootConfigPath = join(fixtureDir, "opencode.json");
       const rootContent = JSON.stringify(
-        { $schema: "https://opencode.ai/config.json", plugin: ["opencode-architect"] },
+        { $schema: "https://opencode.ai/config.json", plugins: ["opencode-architect"] },
         null,
         2
       );
@@ -280,12 +280,12 @@ describe("TestBaseliningPlugin", () => {
       const rootConfigPath = join(fixtureDir, "opencode.json");
       await writeFile(
         rootConfigPath,
-        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: [PACKAGE_NAME] }, null, 2)
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugins: [PACKAGE_NAME] }, null, 2)
       );
       const localDir = join(fixtureDir, ".opencode");
       await mkdir(localDir, { recursive: true });
       const invalidContent =
-        '{\n  "$schema": "https://opencode.ai/config.json",\n  "plugin": [\n    "opencode-architect"\n  ],\n}';
+        '{\n  "$schema": "https://opencode.ai/config.json",\n  "plugins": [\n    "opencode-architect"\n  ],\n}';
       const invalidPath = join(localDir, "opencode.json");
       await writeFile(invalidPath, invalidContent);
 
@@ -306,7 +306,7 @@ describe("TestBaseliningPlugin", () => {
       await mkdir(localDir, { recursive: true });
       await writeFile(
         join(localDir, "opencode.json"),
-        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: [PACKAGE_NAME] }, null, 2)
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugins: [PACKAGE_NAME] }, null, 2)
       );
 
       await invokeConfigHook(fixtureDir);
@@ -318,7 +318,7 @@ describe("TestBaseliningPlugin", () => {
       const globalConfig = JSON.parse(
         await readFile(join(SANDBOX_GLOBAL_BASE, "opencode.json"), "utf-8")
       ) as Record<string, unknown>;
-      expect(globalConfig["plugin"]).toEqual([PACKAGE_NAME]);
+      expect(globalConfig["plugins"]).toEqual([PACKAGE_NAME]);
     });
   });
 
@@ -330,7 +330,7 @@ describe("TestBaseliningPlugin", () => {
       await mkdir(localDir, { recursive: true });
       await writeFile(
         join(localDir, "opencode.json"),
-        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: [PACKAGE_NAME] }, null, 2)
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugins: [PACKAGE_NAME] }, null, 2)
       );
       await invokeConfigHook(fixtureDir);
       const manifestPath = join(localDir, `${PACKAGE_NAME}.manifest.json`);
@@ -354,7 +354,7 @@ describe("TestBaseliningPlugin", () => {
       const localDir = join(fixtureDir, ".opencode");
       await mkdir(localDir, { recursive: true });
       const configContent = JSON.stringify(
-        { $schema: "https://opencode.ai/config.json", plugin: ["opencode-architect"] },
+        { $schema: "https://opencode.ai/config.json", plugins: ["opencode-architect"] },
         null,
         2
       );
@@ -376,7 +376,7 @@ describe("TestBaseliningPlugin", () => {
       const localDir = join(fixtureDir, ".opencode");
       await mkdir(localDir, { recursive: true });
       const invalidContent =
-        '{\n  "$schema": "https://opencode.ai/config.json",\n  "plugin": [\n    "opencode-architect"\n  ],\n}';
+        '{\n  "$schema": "https://opencode.ai/config.json",\n  "plugins": [\n    "opencode-architect"\n  ],\n}';
       await writeFile(join(localDir, "opencode.json"), invalidContent);
 
       await invokeConfigHook(fixtureDir);
@@ -396,7 +396,7 @@ describe("TestBaseliningPlugin", () => {
         {
           $schema: "https://opencode.ai/config.json",
           model: "some/model",
-          plugin: ["opencode-architect"],
+          plugins: ["opencode-architect"],
         },
         null,
         2
@@ -409,6 +409,7 @@ describe("TestBaseliningPlugin", () => {
       expect(await readFile(join(localDir, "opencode.json"), "utf-8")).toBe(configContent);
       expect(input["model"]).toBe("some/model");
       expect(input["$schema"]).toBe("https://opencode.ai/config.json");
+      expect(input["plugins"]).toBeUndefined();
       expect(input["plugin"]).toBeUndefined();
       expectSkillPermissions(input);
     });
@@ -444,7 +445,7 @@ const REPRO_SCENARIOS: ReproScenario[] = [
       await mkdir(localDir, { recursive: true });
       await writeFile(
         join(localDir, "opencode.json"),
-        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: ["opencode-architect"] }, null, 2)
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugins: ["opencode-architect"] }, null, 2)
       );
     },
   },
@@ -455,7 +456,7 @@ const REPRO_SCENARIOS: ReproScenario[] = [
       await mkdir(localDir, { recursive: true });
       await writeFile(
         join(localDir, "opencode.json"),
-        '{\n  "$schema": "https://opencode.ai/config.json",\n  "plugin": [\n    "opencode-architect"\n  ],\n}'
+        '{\n  "$schema": "https://opencode.ai/config.json",\n  "plugins": [\n    "opencode-architect"\n  ],\n}'
       );
     },
   },
@@ -466,7 +467,7 @@ const REPRO_SCENARIOS: ReproScenario[] = [
       await mkdir(localDir, { recursive: true });
       await writeFile(
         join(localDir, "opencode.json"),
-        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: ["opencode-auto-qcgates"] }, null, 2)
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugins: ["opencode-auto-qcgates"] }, null, 2)
       );
       await install("local", dir, { addPluginConfig: false, migrateRootConfig: false, force: false });
     },
@@ -593,7 +594,7 @@ describe("install advisory (one-shot)", () => {
       await mkdir(localDir, { recursive: true });
       await writeFile(
         join(localDir, "opencode.json"),
-        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugin: ["opencode-architect"] }, null, 2)
+        JSON.stringify({ $schema: "https://opencode.ai/config.json", plugins: ["opencode-architect"] }, null, 2)
       );
       await install("local", fixtureDir, { addPluginConfig: false, migrateRootConfig: false, force: false });
 
@@ -646,6 +647,70 @@ describe("failure advisory (one-shot)", () => {
       expect(freshCaptured.logs[0]?.body?.message).toContain("is not installed in any scope");
       expect(freshCaptured.toasts.length).toBe(1);
       expect(freshCaptured.toasts[0]?.body?.message).toContain("is not installed in any scope");
+    });
+  });
+});
+
+describe("legacy singular plugin key upgrade advisory", () => {
+  test("a legacy-only repo: the config hook fires the upgrade advisory once and performs zero writes", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("legacy-hook-advisory");
+      const localDir = join(fixtureDir, ".opencode");
+      await mkdir(localDir, { recursive: true });
+      const legacyContent = `{\n  "plugin": ["${PACKAGE_NAME}"]\n}\n`;
+      const legacyPath = join(localDir, "opencode.json");
+      await writeFile(legacyPath, legacyContent);
+
+      const warnings: string[] = [];
+      const warn = spyOn(console, "warn").mockImplementation((message: unknown) => {
+        warnings.push(String(message));
+      });
+      try {
+        await invokeConfigHook(fixtureDir);
+        await invokeConfigHook(fixtureDir);
+      } finally {
+        warn.mockRestore();
+      }
+
+      const advisories = warnings.filter(w => w.includes("legacy and inert under OpenCode v2"));
+      expect(advisories.length).toBe(1);
+      expect(advisories[0]).toContain(legacyPath);
+      expect(await readFile(legacyPath, "utf-8")).toBe(legacyContent);
+      expect(await exists(join(localDir, "skills"))).toBe(false);
+    });
+  });
+
+  test("a v2 plugins registration alongside a legacy key: hook ensures assets, keeps both keys, and advises once", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("both-keys-hook");
+      const localDir = join(fixtureDir, ".opencode");
+      await mkdir(localDir, { recursive: true });
+      const configContent = [
+        "{",
+        `  "plugin": ["${PACKAGE_NAME}"],`,
+        `  "plugins": ["${PACKAGE_NAME}"]`,
+        "}",
+        "",
+      ].join("\n");
+      const configPath = join(localDir, "opencode.json");
+      await writeFile(configPath, configContent);
+
+      const warnings: string[] = [];
+      const warn = spyOn(console, "warn").mockImplementation((message: unknown) => {
+        warnings.push(String(message));
+      });
+      try {
+        await invokeConfigHook(fixtureDir);
+      } finally {
+        warn.mockRestore();
+      }
+
+      expect(await readFile(configPath, "utf-8")).toBe(configContent);
+      expect(warnings.filter(w => w.includes("legacy and inert under OpenCode v2")).length).toBe(1);
+      expect(await exists(join(localDir, "skills", "test-baselining", "SKILL.md"))).toBe(true);
+      expect(await exists(join(localDir, `${PACKAGE_NAME}.manifest.json`))).toBe(true);
     });
   });
 });
@@ -751,6 +816,8 @@ describe("detectAurelia", () => {
     expect(result.detected).toBe(true);
     expect(result.message).toContain("aurelia-expert");
     expect(result.message).toContain("opencode.json");
+    expect(result.message).toContain('"plugins"');
+    expect(result.message).not.toContain('"plugin":');
     expect(result.message).toContain("npx skills add");
     expect(result.message).not.toContain("bunx aurelia-expert install");
     expect(result.message).not.toContain("npx aurelia-expert install");

@@ -11,6 +11,7 @@ import {
   type PackageOptionalDep,
 } from "./optional-deps.ts";
 import { PluginConfigEditor } from "./plugin-config.ts";
+import { legacyPluginKeyAdvisor } from "./legacy-config-advisory.ts";
 import { CacheCleaner, type CacheOutcome } from "./cache-cleaner.ts";
 import { BundledAssetsMissingError } from "./bundled-assets-missing-error.ts";
 import { CopyModeUnsupportedError } from "./copy-mode-unsupported-error.ts";
@@ -407,13 +408,18 @@ async function writeJsonConfig(path: string, config: Record<string, unknown>): P
   await writeFile(path, JSON.stringify(config, null, 2));
 }
 
-async function readPluginEntries(configPath: string): Promise<string[] | null> {
+interface PluginKeyEntries {
+  v2Entries: string[];
+  legacyEntries: string[];
+}
+
+async function readPluginKeyEntries(configPath: string): Promise<PluginKeyEntries | null> {
   let content: string;
   try {
     content = await readFile(configPath, "utf-8");
   } catch (error) {
     if (isFileNotFoundError(error)) {
-      return [];
+      return { v2Entries: [], legacyEntries: [] };
     }
     return null;
   }
@@ -425,11 +431,17 @@ async function readPluginEntries(configPath: string): Promise<string[] | null> {
     );
     return null;
   }
-  const plugins = config["plugin"];
-  if (!Array.isArray(plugins)) {
+  return {
+    v2Entries: stringEntries(config["plugins"]),
+    legacyEntries: stringEntries(config["plugin"]),
+  };
+}
+
+function stringEntries(value: unknown): string[] {
+  if (!Array.isArray(value)) {
     return [];
   }
-  return plugins.filter((entry): entry is string => typeof entry === "string");
+  return value.filter((entry): entry is string => typeof entry === "string");
 }
 
 export async function isPluginInConfigBase(
@@ -438,12 +450,15 @@ export async function isPluginInConfigBase(
 ): Promise<boolean> {
   let registered = false;
   for (const candidate of candidateConfigPaths(configBase)) {
-    const entries = await readPluginEntries(candidate);
-    if (entries === null) {
+    const read = await readPluginKeyEntries(candidate);
+    if (read === null) {
       continue;
     }
-    if (entries.some(entry => PluginNameNormalizer.matches(entry, packageName))) {
+    if (read.v2Entries.some(entry => PluginNameNormalizer.matches(entry, packageName))) {
       registered = true;
+    }
+    if (read.legacyEntries.some(entry => PluginNameNormalizer.matches(entry, packageName))) {
+      legacyPluginKeyAdvisor.advise(candidate, packageName);
     }
   }
   return registered;
@@ -809,11 +824,11 @@ async function readScopeStatus(configBase: string, packageName: string): Promise
 }
 
 async function isRecordedEntryPresent(configPath: string, packageName: string): Promise<boolean> {
-  const entries = await readPluginEntries(configPath);
-  if (entries === null) {
+  const read = await readPluginKeyEntries(configPath);
+  if (read === null) {
     return false;
   }
-  return entries.some(entry => PluginNameNormalizer.matches(entry, packageName));
+  return read.v2Entries.some(entry => PluginNameNormalizer.matches(entry, packageName));
 }
 
 export async function detectAurelia(projectDir: string): Promise<AureliaRecommendation> {
@@ -851,8 +866,8 @@ export async function detectAurelia(projectDir: string): Promise<AureliaRecommen
     "The opencode-auto-qcgates skills are VCS-agnostic and backend/frontend-language agnostic, but",
     "for richer AI-assisted Aurelia work, install the aurelia-expert skill pack (it is not a",
     "dependency — these paths are surfaced by the installer only, never auto-applied):",
-    "  - OpenCode (recommended): add \"aurelia-expert@latest\" to your opencode.json `plugin` array, e.g.",
-    `      { "$schema": "https://opencode.ai/config.json", "plugin": ["aurelia-expert@latest"] }`,
+    "  - OpenCode (recommended): add \"aurelia-expert@latest\" to your opencode.json `plugins` array, e.g.",
+    `      { "$schema": "https://opencode.ai/config.json", "plugins": ["aurelia-expert@latest"] }`,
     "  - Cross-agent / non-OpenCode: `npx skills add expert-vision-software/aurelia-expert`",
   ].join("\n");
 
@@ -923,7 +938,7 @@ export function mergeConfigWithOverrides(
   localConfig: Record<string, unknown>
 ): void {
   for (const [key, value] of Object.entries(localConfig)) {
-    if (key === "plugin" || key === "agent") {
+    if (key === "plugin" || key === "plugins" || key === "agent") {
       continue;
     }
     input[key] = value;

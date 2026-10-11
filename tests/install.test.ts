@@ -4,6 +4,7 @@ import { exists, mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import {
   getContentDeclaration,
   install,
+  isPluginInConfigBase,
   isScopeInstalled,
   migrateRootConfig,
   resolveMode,
@@ -55,7 +56,7 @@ async function readLocalConfigRaw(fixtureDir: string): Promise<string> {
 
 async function readPluginArray(fixtureDir: string): Promise<string[]> {
   const config = JSON.parse(await readLocalConfigRaw(fixtureDir)) as Record<string, unknown>;
-  return (config["plugin"] as string[]) ?? [];
+  return (config["plugins"] as string[]) ?? [];
 }
 
 async function captureWarnings(operation: () => Promise<void>): Promise<string[]> {
@@ -112,7 +113,7 @@ describe("config writes over unparseable JSON", () => {
     const localDir = join(fixtureDir, ".opencode");
     await mkdir(localDir, { recursive: true });
     const invalidContent =
-      '{\n  "$schema": "https://opencode.ai/config.json",\n  "plugin": [\n    "opencode-architect"\n  ],\n}';
+      '{\n  "$schema": "https://opencode.ai/config.json",\n  "plugins": [\n    "opencode-architect"\n  ],\n}';
     await writeFile(join(localDir, "opencode.json"), invalidContent);
 
     let pluginAdded = true;
@@ -158,6 +159,7 @@ describe("canonical plugin references", () => {
     });
 
     expect(result.pluginAdded).toBe(true);
+    expect(await readLocalConfigRaw(fixtureDir)).toContain('"plugins"');
     const plugins = await readPluginArray(fixtureDir);
     expect(plugins).toEqual([CANONICAL_PLUGIN_REF]);
   });
@@ -166,7 +168,7 @@ describe("canonical plugin references", () => {
     const fixtureDir = await makeFixture("dedup-bare-name");
     await writeLocalConfig(fixtureDir, {
       $schema: "https://opencode.ai/config.json",
-      plugin: [PACKAGE_NAME],
+      plugins: [PACKAGE_NAME],
     });
 
     const result = await install("local", fixtureDir, {
@@ -183,7 +185,7 @@ describe("canonical plugin references", () => {
     const fixtureDir = await makeFixture("dedup-pinned");
     await writeLocalConfig(fixtureDir, {
       $schema: "https://opencode.ai/config.json",
-      plugin: [`${PACKAGE_NAME}@1.2.0`],
+      plugins: [`${PACKAGE_NAME}@1.2.0`],
     });
 
     const result = await install("local", fixtureDir, {
@@ -200,13 +202,127 @@ describe("canonical plugin references", () => {
     const fixtureDir = await makeFixture("uninstall-semantic");
     await writeLocalConfig(fixtureDir, {
       $schema: "https://opencode.ai/config.json",
-      plugin: [PACKAGE_NAME, CANONICAL_PLUGIN_REF],
+      plugins: [PACKAGE_NAME, CANONICAL_PLUGIN_REF],
     });
 
     const result = await uninstall("local", fixtureDir);
 
     expect(result.pluginRemoved).toBe(true);
     expect(await readPluginArray(fixtureDir)).toEqual([]);
+  });
+});
+
+describe("v2 plugins key registration", () => {
+  const ADD_PLUGIN_OPTIONS = { addPluginConfig: true, migrateRootConfig: false, force: false };
+  const LEGACY_ADVISORY_MARKER = "legacy and inert under OpenCode v2";
+
+  async function writeRawLocalConfig(fixtureDir: string, content: string): Promise<string> {
+    const localDir = join(fixtureDir, ".opencode");
+    await mkdir(localDir, { recursive: true });
+    const configPath = join(localDir, "opencode.json");
+    await writeFile(configPath, content);
+    return configPath;
+  }
+
+  test("a plugins-keyed registration is detected and install is a zero-write no-op across bare, @latest, and pinned spellings", async () => {
+    const spellings = [PACKAGE_NAME, CANONICAL_PLUGIN_REF, `${PACKAGE_NAME}@2.1.0`];
+    for (const [index, spelling] of spellings.entries()) {
+      const fixtureDir = await makeFixture(`v2-noop-${index}`);
+      const content = `{\n  "plugins": ["${spelling}"]\n}\n`;
+      const configPath = await writeRawLocalConfig(fixtureDir, content);
+
+      const result = await install("local", fixtureDir, ADD_PLUGIN_OPTIONS);
+
+      expect(result.pluginAdded).toBe(false);
+      expect(await readFile(configPath, "utf-8")).toBe(content);
+      expect(await isPluginInConfigBase(join(fixtureDir, ".opencode"), PACKAGE_NAME)).toBe(true);
+    }
+  });
+
+  test("a legacy-only plugin config gets a v2 plugins entry spliced in while the legacy key survives byte-for-byte", async () => {
+    const fixtureDir = await makeFixture("legacy-only-splice");
+    const content = [
+      "{",
+      '  "$schema": "https://opencode.ai/config.json",',
+      '  "model": "some/model",',
+      `  "plugin": ["${PACKAGE_NAME}"]`,
+      "}",
+      "",
+    ].join("\n");
+    const configPath = await writeRawLocalConfig(fixtureDir, content);
+
+    const result = await install("local", fixtureDir, ADD_PLUGIN_OPTIONS);
+
+    expect(result.pluginAdded).toBe(true);
+    const expected = [
+      "{",
+      `  "plugins": ["${CANONICAL_PLUGIN_REF}"],`,
+      '  "$schema": "https://opencode.ai/config.json",',
+      '  "model": "some/model",',
+      `  "plugin": ["${PACKAGE_NAME}"]`,
+      "}",
+      "",
+    ].join("\n");
+    expect(await readFile(configPath, "utf-8")).toBe(expected);
+  });
+
+  test("the legacy upgrade advisory fires once per session across repeated installs", async () => {
+    const fixtureDir = await makeFixture("legacy-advisory-once");
+    const content = `{\n  "plugin": ["${PACKAGE_NAME}"]\n}\n`;
+    const configPath = await writeRawLocalConfig(fixtureDir, content);
+
+    const firstWarnings = await captureWarnings(async () => {
+      const result = await install("local", fixtureDir, ADD_PLUGIN_OPTIONS);
+      expect(result.pluginAdded).toBe(true);
+    });
+    expect(firstWarnings.filter(w => w.includes(LEGACY_ADVISORY_MARKER)).length).toBe(1);
+
+    const secondWarnings = await captureWarnings(async () => {
+      const result = await install("local", fixtureDir, ADD_PLUGIN_OPTIONS);
+      expect(result.pluginAdded).toBe(false);
+    });
+    expect(secondWarnings.filter(w => w.includes(LEGACY_ADVISORY_MARKER)).length).toBe(0);
+    expect(await readFile(configPath, "utf-8")).toContain(`"plugin": ["${PACKAGE_NAME}"]`);
+  });
+
+  test("a config holding both keys is a zero-write no-op that keeps the legacy key and still advises once", async () => {
+    const fixtureDir = await makeFixture("both-keys-noop");
+    const content = [
+      "{",
+      `  "plugin": ["${PACKAGE_NAME}"],`,
+      `  "plugins": ["${PACKAGE_NAME}"]`,
+      "}",
+      "",
+    ].join("\n");
+    const configPath = await writeRawLocalConfig(fixtureDir, content);
+
+    const firstWarnings = await captureWarnings(async () => {
+      const result = await install("local", fixtureDir, ADD_PLUGIN_OPTIONS);
+      expect(result.pluginAdded).toBe(false);
+    });
+    expect(await readFile(configPath, "utf-8")).toBe(content);
+    expect(firstWarnings.filter(w => w.includes(LEGACY_ADVISORY_MARKER)).length).toBe(1);
+
+    const secondWarnings = await captureWarnings(async () => {
+      await install("local", fixtureDir, ADD_PLUGIN_OPTIONS);
+    });
+    expect(await readFile(configPath, "utf-8")).toBe(content);
+    expect(secondWarnings.filter(w => w.includes(LEGACY_ADVISORY_MARKER)).length).toBe(0);
+  });
+
+  test("up-to-date status requires the v2 plugins entry: a legacy-only registration reports not installed and a later install re-adds it", async () => {
+    const fixtureDir = await makeFixture("legacy-up-to-date");
+    await install("local", fixtureDir, ADD_PLUGIN_OPTIONS);
+    const legacyOnly = `{\n  "plugin": ["${PACKAGE_NAME}"]\n}\n`;
+    await writeRawLocalConfig(fixtureDir, legacyOnly);
+
+    expect((await status(fixtureDir)).local).toBeNull();
+    expect(await isScopeInstalled(join(fixtureDir, ".opencode"), PACKAGE_NAME)).toBe(false);
+
+    const result = await install("local", fixtureDir, ADD_PLUGIN_OPTIONS);
+
+    expect(result.pluginAdded).toBe(true);
+    expect((await status(fixtureDir)).local?.installed).toBe(true);
   });
 });
 
@@ -335,7 +451,7 @@ describe("root config migration guard", () => {
     expect(await exists(join(fixtureDir, "opencode.json"))).toBe(false);
     const migrated = JSON.parse(await readLocalConfigRaw(fixtureDir)) as Record<string, unknown>;
     expect(migrated["model"]).toBe("some/model");
-    expect(migrated["plugin"]).toEqual([CANONICAL_PLUGIN_REF]);
+    expect(migrated["plugins"]).toEqual([CANONICAL_PLUGIN_REF]);
   });
 });
 
@@ -599,7 +715,7 @@ describe("surgical plugin-array registration", () => {
     const jsonPath = join(localDir, "opencode.json");
     const jsoncPath = join(localDir, "opencode.jsonc");
     const jsonContent = JSON.stringify({ $schema: "https://opencode.ai/config.json" }, null, 2) + "\n";
-    const jsoncContent = `{\n  "plugin": ["${CANONICAL_PLUGIN_REF}"]\n}\n`;
+    const jsoncContent = `{\n  "plugins": ["${CANONICAL_PLUGIN_REF}"]\n}\n`;
     await writeFile(jsonPath, jsonContent);
     await writeFile(jsoncPath, jsoncContent);
 
@@ -642,7 +758,7 @@ describe("surgical plugin-array registration", () => {
       "  // keep this comment",
       '  "$schema": "https://opencode.ai/config.json",',
       '  "model": "some/model",',
-      '  "plugin": [',
+      '  "plugins": [',
       '    "opencode-architect"',
       "  ]",
       "}",
@@ -666,7 +782,7 @@ describe("surgical plugin-array registration", () => {
     const fixtureDir = await makeFixture("splice-noop");
     const localDir = join(fixtureDir, ".opencode");
     await mkdir(localDir, { recursive: true });
-    const content = `{\n  "plugin": ["${PACKAGE_NAME}@1.2.0"]\n}\n`;
+    const content = `{\n  "plugins": ["${PACKAGE_NAME}@1.2.0"]\n}\n`;
     await writeFile(join(localDir, "opencode.json"), content);
 
     await install("local", fixtureDir, {

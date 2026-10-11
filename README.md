@@ -93,7 +93,7 @@ Add to `.opencode/opencode.json` in your project:
 ```json
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugin": ["opencode-auto-qcgates@latest"]
+  "plugins": ["opencode-auto-qcgates@latest"]
 }
 ```
 
@@ -103,7 +103,7 @@ For local development against a checkout of this repo, reference the directory d
 
 ```json
 {
-  "plugin": ["file:///absolute/path/to/opencode-auto-qcgates"]
+  "plugins": ["file:///absolute/path/to/opencode-auto-qcgates"]
 }
 ```
 
