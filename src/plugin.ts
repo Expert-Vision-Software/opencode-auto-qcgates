@@ -1,106 +1,48 @@
-import type { Plugin, Config, PluginInput } from "@opencode-ai/plugin";
+import { Effect, type Scope } from "effect";
+import { Agent, Plugin } from "@opencode/plugin/effect";
 import {
   install,
-  readLocalConfig,
-  mergeConfigWithOverrides,
   getPackageName,
   getPackageVersion,
-  type Scope,
-  type InstallResult,
+  type Scope as InstallScope,
 } from "./installer.ts";
 import { RegistrationDetector } from "./registration.ts";
 import { CacheCleaner } from "./cache-cleaner.ts";
 
 const PLUGIN_SERVICE_NAME = "opencode-auto-qcgates";
-const ADVISORY_TOAST_DURATION_MS = 10000;
 const INSTALL_ADVISORY_MESSAGE = `${PLUGIN_SERVICE_NAME} is not installed in any scope. Run "bunx opencode-auto-qcgates install --scope global" to enable the quality-gate skills and commands.`;
 const LOAD_INSTALL_OPTIONS = { addPluginConfig: false, migrateRootConfig: false, force: false };
 const LOAD_PRUNE_CACHE = false;
 const FALLBACK_CACHE_DIR = "~/.cache/opencode/npm/opencode-auto-qcgates@<version>";
+const TASK_AGENT_ID = "task";
+const TASK_SKILL_RESOURCES = ["test-baselining", "regression-checking", "grilling"];
 
-type PluginClient = PluginInput["client"] | undefined;
+type PermissionRule = Agent.Info["permissions"][number];
 
-interface AdvisoryState {
-  emitted: boolean;
-}
-
-function setTaskSkillPermissions(input: Config): void {
-  input.agent ??= {};
-  input.agent.task ??= {};
-
-  const taskAgent = input.agent.task as Record<string, unknown>;
-  taskAgent.permission ??= {};
-
-  const permission = taskAgent.permission as Record<string, unknown>;
-  permission.skill ??= {};
-  const skillPermissions = permission.skill as Record<string, string>;
-
-  for (const skillName of ["test-baselining", "regression-checking", "grilling"]) {
-    skillPermissions[skillName] = "allow";
-  }
-}
-
-async function mergeExistingLocalOverrides(input: Record<string, unknown>, directory: string): Promise<void> {
-  const localConfig = await readLocalConfig(directory);
-  if (localConfig === null) {
-    return;
-  }
-  mergeConfigWithOverrides(input, localConfig);
-}
-
-async function logWarn(client: PluginClient, message: string): Promise<void> {
-  const log = client?.app?.log;
-  if (!log) {
-    console.warn(`[${PLUGIN_SERVICE_NAME}] ${message}`);
-    return;
-  }
-  try {
-    await log({ body: { service: PLUGIN_SERVICE_NAME, level: "warn", message } });
-  } catch {
-    console.warn(`[${PLUGIN_SERVICE_NAME}] ${message}`);
-  }
-}
-
-async function showToastAdvisory(client: PluginClient, message: string): Promise<void> {
-  try {
-    await client?.tui?.showToast?.({
-      body: {
-        title: PLUGIN_SERVICE_NAME,
-        message,
-        variant: "warning",
-        duration: ADVISORY_TOAST_DURATION_MS,
-      },
-    });
-  } catch {
-    return;
-  }
-}
-
-async function maybeEmitInstallAdvisory(state: AdvisoryState, client: PluginClient, directory: string): Promise<void> {
-  if (state.emitted || (await RegistrationDetector.hasAnyInstallation(directory))) {
-    return;
-  }
-  state.emitted = true;
-  await logWarn(client, INSTALL_ADVISORY_MESSAGE);
-  await showToastAdvisory(client, INSTALL_ADVISORY_MESSAGE);
-}
-
-async function reportLoadSkippedFiles(client: PluginClient, result: InstallResult): Promise<void> {
-  for (const skippedPath of result.skipped) {
-    await logWarn(
-      client,
-      `Skipped consumer-modified file (re-run "bunx opencode-auto-qcgates install --force" to overwrite): ${skippedPath}`
-    );
-  }
-}
-
-async function ensureScopeAssets(client: PluginClient, scope: Scope, directory: string): Promise<InstallResult> {
-  const result = await install(scope, directory, LOAD_INSTALL_OPTIONS, null, LOAD_PRUNE_CACHE);
-  await reportLoadSkippedFiles(client, result);
-  return result;
-}
+let notInstalledAdvised = false;
+let failureAdvised = false;
 
 const cacheCleaner = new CacheCleaner();
+
+const TASK_SKILL_RULES: PermissionRule[] = TASK_SKILL_RESOURCES.map((resource) => ({
+  action: "skill",
+  resource,
+  effect: "allow",
+}));
+
+function logWarn(message: string): void {
+  try {
+    console.warn(`[${PLUGIN_SERVICE_NAME}] ${message}`);
+  } catch {}
+}
+
+async function adviseNotInstalledOnce(): Promise<void> {
+  if (notInstalledAdvised) {
+    return;
+  }
+  notInstalledAdvised = true;
+  logWarn(INSTALL_ADVISORY_MESSAGE);
+}
 
 function getCacheDirDisplay(packageName: string, packageVersion: string): string {
   return `${cacheCleaner.packagesCacheRootDisplay()}/${packageName}@${packageVersion}`;
@@ -127,55 +69,98 @@ function buildFailureFallbackMessage(): string {
   );
 }
 
-async function emitFailureAdvisory(client: PluginClient, error: unknown): Promise<void> {
+async function adviseFailureOnce(error: unknown): Promise<void> {
+  if (failureAdvised) {
+    return;
+  }
+  failureAdvised = true;
   let message: string;
   try {
     message = await buildFailureMessage(error);
   } catch {
     message = buildFailureFallbackMessage();
   }
-  await logWarn(client, message);
-  await showToastAdvisory(client, message);
+  logWarn(message);
 }
 
-async function maybeEmitFailureAdvisory(
-  state: AdvisoryState,
-  client: PluginClient,
-  error: unknown
-): Promise<void> {
-  if (state.emitted) {
-    return;
-  }
-  state.emitted = true;
-  await emitFailureAdvisory(client, error);
+function advisoryEffect(run: () => Promise<void>): Effect.Effect<void, never> {
+  return Effect.asVoid(
+    Effect.orElseSucceed(Effect.tryPromise({ try: run, catch: () => "advisory failed" }), () => undefined),
+  );
 }
 
-const plugin: Plugin = async ({ directory, client }) => {
-  const installAdvisoryState: AdvisoryState = { emitted: false };
-  const failureAdvisoryState: AdvisoryState = { emitted: false };
+function mergeTaskSkillRules(existing: ReadonlyArray<PermissionRule>): PermissionRule[] {
+  const owned = new Set(TASK_SKILL_RESOURCES);
+  const preserved = existing.filter((rule) => !(rule.action === "skill" && owned.has(rule.resource)));
+  return [...preserved, ...TASK_SKILL_RULES];
+}
 
-  return {
-    config: async (input: Config) => {
-      try {
-        setTaskSkillPermissions(input);
-        await mergeExistingLocalOverrides(input as Record<string, unknown>, directory);
-
-        const context = await RegistrationDetector.detect(directory);
-        const scopes = RegistrationDetector.scopesToEnsure(context);
-
-        if (scopes.length === 0) {
-          await maybeEmitInstallAdvisory(installAdvisoryState, client, directory);
-          return;
-        }
-
-        for (const scope of scopes) {
-          await ensureScopeAssets(client, scope, directory);
-        }
-      } catch (error) {
-        await maybeEmitFailureAdvisory(failureAdvisoryState, client, error);
+function seedTaskSkillPermissions(context: Plugin.Context): Effect.Effect<void, never, Scope.Scope> {
+  return Effect.asVoid(
+    context.agent.transform((editor) => {
+      const task = editor.get(TASK_AGENT_ID);
+      if (!task) {
+        return;
       }
-    },
-  };
-};
+      editor.update(TASK_AGENT_ID, (agent) => {
+        agent.permissions = mergeTaskSkillRules(agent.permissions);
+      });
+    }),
+  );
+}
+
+async function ensureScopeAssets(scope: InstallScope, directory: string): Promise<void> {
+  const result = await install(scope, directory, LOAD_INSTALL_OPTIONS, null, LOAD_PRUNE_CACHE);
+  for (const skippedPath of result.skipped) {
+    logWarn(
+      `Skipped consumer-modified file (re-run "bunx opencode-auto-qcgates install --force" to overwrite): ${skippedPath}`
+    );
+  }
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function selfEnsureEffect(context: Plugin.Context): Effect.Effect<void, string, Scope.Scope> {
+  return Effect.gen(function* () {
+    yield* seedTaskSkillPermissions(context);
+    const directory = context.location.directory;
+    const detected = yield* Effect.tryPromise({
+      try: () => RegistrationDetector.detect(directory),
+      catch: describeError,
+    });
+    const scopes = RegistrationDetector.scopesToEnsure(detected);
+    if (scopes.length === 0) {
+      yield* Effect.tryPromise({
+        try: async () => {
+          if (await RegistrationDetector.hasAnyInstallation(directory)) {
+            return;
+          }
+          await adviseNotInstalledOnce();
+        },
+        catch: describeError,
+      });
+      return;
+    }
+    for (const scope of scopes) {
+      yield* Effect.tryPromise({
+        try: () => ensureScopeAssets(scope, directory),
+        catch: describeError,
+      });
+    }
+  });
+}
+
+function runStartupSelfEnsure(context: Plugin.Context): Effect.Effect<void, never, Scope.Scope> {
+  return Effect.catch(selfEnsureEffect(context), (message) => advisoryEffect(() => adviseFailureOnce(message)));
+}
+
+const plugin = Plugin.define({
+  id: PLUGIN_SERVICE_NAME,
+  effect: Effect.fn(function* (context: Plugin.Context) {
+    yield* runStartupSelfEnsure(context);
+  }),
+});
 
 export default plugin;

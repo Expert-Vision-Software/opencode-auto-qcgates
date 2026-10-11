@@ -1,7 +1,9 @@
 import { describe, test, expect, beforeAll, afterAll, spyOn } from "bun:test";
 import { join } from "node:path";
 import { exists, mkdir, rm, readFile, writeFile } from "node:fs/promises";
+import { Effect, type Scope } from "effect";
 import plugin from "../src/plugin.ts";
+import type { Plugin } from "@opencode/plugin/effect";
 import { detectAurelia, detectOptionalSkills, install } from "../src/installer.ts";
 import { snapshotDirectory } from "./snapshot.ts";
 import {
@@ -10,6 +12,11 @@ import {
   withGlobalSandbox,
   writeGlobalPluginConfig,
 } from "./global-sandbox.ts";
+
+interface PluginDefinition {
+  readonly id: string;
+  readonly effect: (context: Plugin.Context) => Effect.Effect<void, never, Scope.Scope>;
+}
 
 const TEST_DIR = join(import.meta.dirname, ".test-temp");
 process.env.XDG_CACHE_HOME = join(import.meta.dirname, ".test-xdg-cache");
@@ -31,38 +38,113 @@ async function makeFixture(name: string): Promise<string> {
   return fixtureDir;
 }
 
-async function invokeConfigHook(fixtureDir: string, input: Record<string, unknown> = {}): Promise<void> {
-  // @ts-ignore - PluginInput requires full context, we only need directory
-  const pluginResult = await plugin({ directory: fixtureDir });
-  // @ts-ignore - config returns async function that takes Config argument
-  await (pluginResult.config as ((input: unknown) => Promise<void>) | undefined)?.(input);
+interface FakeAgentRecord {
+  id: string;
+  name: string;
+  permissions: Array<{ action: string; resource: string; effect: string }>;
 }
 
-async function expectSkillPermissions(input: Record<string, unknown>): Promise<void> {
-  const agent = input.agent as Record<string, unknown> | undefined;
-  const task = agent?.task as Record<string, unknown> | undefined;
-  const permission = task?.permission as Record<string, unknown> | undefined;
-  const skillPermissions = permission?.skill as Record<string, string> | undefined;
-  expect(skillPermissions?.["test-baselining"]).toBe("allow");
-  expect(skillPermissions?.["regression-checking"]).toBe("allow");
-  expect(skillPermissions?.["grilling"]).toBe("allow");
+interface FakeAgentRegistry {
+  agents: FakeAgentRecord[];
+  domain: Plugin.Context["agent"];
+}
+
+function makeAgentRegistry(): FakeAgentRegistry {
+  const agents: FakeAgentRecord[] = [
+    {
+      id: "task",
+      name: "task",
+      permissions: [{ action: "skill", resource: "unrelated-skill", effect: "ask" }],
+    },
+  ];
+  const editor = {
+    list: () => agents,
+    get: (id: string) => agents.find((agent) => agent.id === id),
+    default: () => undefined,
+    update: (id: string, update: (agent: FakeAgentRecord) => void) => {
+      const agent = agents.find((item) => item.id === id);
+      if (agent) {
+        update(agent);
+      }
+    },
+    remove: (id: string) => {
+      const index = agents.findIndex((item) => item.id === id);
+      if (index >= 0) {
+        agents.splice(index, 1);
+      }
+    },
+  };
+  const domain = {
+    transform: (callback: (input: typeof editor) => void) =>
+      Effect.sync(() => {
+        callback(editor);
+        return { dispose: Effect.void };
+      }),
+  };
+  return { agents, domain: domain as unknown as Plugin.Context["agent"] };
+}
+
+function makePluginContext(directory: string, registry: FakeAgentRegistry): Plugin.Context {
+  return {
+    location: { directory },
+    agent: registry.domain,
+  } as unknown as Plugin.Context;
+}
+
+async function loadPluginSession(session: string): Promise<{ default: PluginDefinition }> {
+  return import(`../src/plugin.ts?session=${session}`);
+}
+
+function runLoadCycle(
+  module: PluginDefinition,
+  fixtureDir: string,
+  registry: FakeAgentRegistry
+): Promise<void> {
+  return Effect.runPromise(Effect.scoped(module.effect(makePluginContext(fixtureDir, registry))));
+}
+
+async function invokeLoadCycle(session: string, fixtureDir: string): Promise<FakeAgentRegistry> {
+  const registry = makeAgentRegistry();
+  const loaded = await loadPluginSession(session);
+  await runLoadCycle(loaded.default, fixtureDir, registry);
+  return registry;
+}
+
+function expectSkillPermissions(registry: FakeAgentRegistry): void {
+  const task = registry.agents.find((agent) => agent.id === "task");
+  expect(task).toBeDefined();
+  const permissions = task?.permissions ?? [];
+  for (const resource of ["test-baselining", "regression-checking", "grilling"]) {
+    const rules = permissions.filter((rule) => rule.action === "skill" && rule.resource === resource);
+    expect(rules).toHaveLength(1);
+    expect(rules[0]?.effect).toBe("allow");
+  }
+  const foreign = permissions.filter((rule) => rule.resource === "unrelated-skill");
+  expect(foreign).toHaveLength(1);
+  expect(foreign[0]?.effect).toBe("ask");
+}
+
+function captureConsoleWarnings(): { warnings: string[]; restore: () => void } {
+  const warnings: string[] = [];
+  const spy = spyOn(console, "warn").mockImplementation((message: unknown) => {
+    warnings.push(String(message));
+  });
+  return { warnings, restore: () => spy.mockRestore() };
 }
 
 describe("TestBaseliningPlugin", () => {
-  test("plugin returns config function", async () => {
-    // @ts-ignore - PluginInput requires full context, we only need directory
-    const result = await plugin({ directory: TEST_DIR });
-    expect(result.config).toBeDefined();
-    expect(typeof result.config).toBe("function");
+  test("plugin definition exposes a stable id and an effect", () => {
+    expect(plugin.id).toBe(PACKAGE_NAME);
+    expect(typeof plugin.effect).toBe("function");
   });
 
-  test("unregistered repo with nothing installed: config hook performs zero disk writes", async () => {
+  test("unregistered repo with nothing installed: load cycle performs zero disk writes", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       const fixtureDir = await makeFixture("zero-write-repo");
 
       const before = await snapshotDirectory(fixtureDir);
-      await invokeConfigHook(fixtureDir);
+      await invokeLoadCycle("zero-write", fixtureDir);
       const after = await snapshotDirectory(fixtureDir);
 
       expect(after).toEqual(before);
@@ -84,15 +166,13 @@ describe("TestBaseliningPlugin", () => {
       );
       await writeFile(configPath, configContent);
 
-      const input = {} as Record<string, unknown>;
-      await invokeConfigHook(fixtureDir, input);
+      const registry = await invokeLoadCycle("repo-local-ensure", fixtureDir);
 
       expect(await readFile(configPath, "utf-8")).toBe(configContent);
       expect(await exists(join(fixtureDir, ".opencode", "skills", "test-baselining", "SKILL.md"))).toBe(true);
       expect(await exists(join(fixtureDir, ".opencode", "commands", "test-baseline.md"))).toBe(true);
       expect(await exists(join(fixtureDir, ".opencode", `${PACKAGE_NAME}.manifest.json`))).toBe(true);
-      expect(input["model"]).toBe("some/model");
-      expectSkillPermissions(input);
+      expectSkillPermissions(registry);
     });
   });
 
@@ -103,7 +183,7 @@ describe("TestBaseliningPlugin", () => {
       const fixtureDir = await makeFixture("global-context-fresh");
       const repoBefore = await snapshotDirectory(fixtureDir);
 
-      await invokeConfigHook(fixtureDir);
+      await invokeLoadCycle("global-fresh", fixtureDir);
 
       expect(await snapshotDirectory(fixtureDir)).toEqual(repoBefore);
       expect(await exists(join(SANDBOX_GLOBAL_BASE, `${PACKAGE_NAME}.manifest.json`))).toBe(true);
@@ -130,7 +210,7 @@ describe("TestBaseliningPlugin", () => {
       const fixtureDir = await makeFixture("global-jsonc-context-fresh");
       const repoBefore = await snapshotDirectory(fixtureDir);
 
-      await invokeConfigHook(fixtureDir);
+      await invokeLoadCycle("global-jsonc-fresh", fixtureDir);
 
       expect(await readFile(join(SANDBOX_GLOBAL_BASE, "opencode.jsonc"), "utf-8")).toBe(jsoncContent);
       expect(await exists(join(SANDBOX_GLOBAL_BASE, "opencode.json"))).toBe(false);
@@ -155,40 +235,36 @@ describe("TestBaseliningPlugin", () => {
       const jsoncPath = join(localDir, "opencode.jsonc");
       await writeFile(jsoncPath, jsoncContent);
 
-      const input = {} as Record<string, unknown>;
-      await invokeConfigHook(fixtureDir, input);
+      const registry = await invokeLoadCycle("repo-local-jsonc-ensure", fixtureDir);
 
       expect(await readFile(jsoncPath, "utf-8")).toBe(jsoncContent);
       expect(await exists(join(localDir, "skills", "test-baselining", "SKILL.md"))).toBe(true);
       expect(await exists(join(localDir, "commands", "test-baseline.md"))).toBe(true);
       expect(await exists(join(localDir, `${PACKAGE_NAME}.manifest.json`))).toBe(true);
-      expectSkillPermissions(input);
+      expectSkillPermissions(registry);
     });
   });
 
-  test("config hook survives an install failure caused by a blocked destination: degrades to a warn log and toast, never rejects", async () => {
+  test("load cycle survives an install failure caused by a blocked destination: degrades to a warn, never rejects", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       await writeGlobalPluginConfig([PACKAGE_NAME]);
       const fixtureDir = await makeFixture("hook-degrade-install-failure");
       await mkdir(SANDBOX_GLOBAL_BASE, { recursive: true });
       await writeFile(join(SANDBOX_GLOBAL_BASE, "skills"), "not a directory");
-      const { client, captured } = makeCapturingClient();
-      const input = {} as Record<string, unknown>;
 
-      await expect(invokeConfigHookWithClient(fixtureDir, client, input)).resolves.toBeUndefined();
+      const { warnings, restore } = captureConsoleWarnings();
+      try {
+        const registry = await invokeLoadCycle("blocked-destination", fixtureDir);
 
-      expect(captured.logs.length).toBe(1);
-      expect(captured.logs[0]?.body?.service).toBe(PACKAGE_NAME);
-      expect(captured.logs[0]?.body?.level).toBe("warn");
-      expect(captured.toasts.length).toBe(1);
-      expect(captured.toasts[0]?.body?.variant).toBe("warning");
-      expect(captured.logs[0]?.body?.message).toContain("bunx opencode-auto-qcgates install --scope global");
-      expect(captured.toasts[0]?.body?.message).toContain("bunx opencode-auto-qcgates install --scope global");
-      expect(captured.logs[0]?.body?.message).toContain(
-        `opencode/npm/${PACKAGE_NAME}@`
-      );
-      expectSkillPermissions(input);
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain("startup self-ensure failed");
+        expect(warnings[0]).toContain("bunx opencode-auto-qcgates install --scope global");
+        expect(warnings[0]).toContain(`opencode/npm/${PACKAGE_NAME}@`);
+        expectSkillPermissions(registry);
+      } finally {
+        restore();
+      }
     });
   });
 
@@ -198,11 +274,11 @@ describe("TestBaseliningPlugin", () => {
       await writeGlobalPluginConfig([PACKAGE_NAME]);
       const fixtureDir = await makeFixture("global-context-steady");
 
-      await invokeConfigHook(fixtureDir);
+      await invokeLoadCycle("steady-1", fixtureDir);
       const globalBefore = await snapshotDirectory(SANDBOX_GLOBAL_BASE);
       const repoBefore = await snapshotDirectory(fixtureDir);
 
-      await invokeConfigHook(fixtureDir);
+      await invokeLoadCycle("steady-2", fixtureDir);
 
       expect(await snapshotDirectory(SANDBOX_GLOBAL_BASE)).toEqual(globalBefore);
       expect(await snapshotDirectory(fixtureDir)).toEqual(repoBefore);
@@ -215,14 +291,14 @@ describe("TestBaseliningPlugin", () => {
       await writeGlobalPluginConfig([PACKAGE_NAME]);
       const fixtureDir = await makeFixture("global-context-drift");
 
-      await invokeConfigHook(fixtureDir);
+      await invokeLoadCycle("global-drift-1", fixtureDir);
       const manifestPath = join(SANDBOX_GLOBAL_BASE, `${PACKAGE_NAME}.manifest.json`);
       const manifest = JSON.parse(await readFile(manifestPath, "utf-8")) as { version: string };
       manifest.version = "0.0.1";
       await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
       const repoBefore = await snapshotDirectory(fixtureDir);
 
-      await invokeConfigHook(fixtureDir);
+      await invokeLoadCycle("global-drift-2", fixtureDir);
 
       const rewritten = JSON.parse(await readFile(manifestPath, "utf-8")) as { version: string };
       expect(rewritten.version).not.toBe("0.0.1");
@@ -242,7 +318,7 @@ describe("TestBaseliningPlugin", () => {
       );
       await writeFile(rootConfigPath, rootContent);
 
-      await invokeConfigHook(fixtureDir);
+      await invokeLoadCycle("repo-root", fixtureDir);
 
       expect(await readFile(rootConfigPath, "utf-8")).toBe(rootContent);
       expect(await exists(join(fixtureDir, ".opencode", `${PACKAGE_NAME}.manifest.json`))).toBe(true);
@@ -265,7 +341,7 @@ describe("TestBaseliningPlugin", () => {
       await writeFile(rootConfigPath, rootContent);
       const repoBefore = await snapshotDirectory(fixtureDir);
 
-      await invokeConfigHook(fixtureDir);
+      await invokeLoadCycle("root-foreign", fixtureDir);
 
       expect(await readFile(rootConfigPath, "utf-8")).toBe(rootContent);
       expect(await snapshotDirectory(fixtureDir)).toEqual(repoBefore);
@@ -289,7 +365,7 @@ describe("TestBaseliningPlugin", () => {
       const invalidPath = join(localDir, "opencode.json");
       await writeFile(invalidPath, invalidContent);
 
-      await invokeConfigHook(fixtureDir);
+      await invokeLoadCycle("repo-local-invalid", fixtureDir);
 
       expect(await readFile(invalidPath, "utf-8")).toBe(invalidContent);
       expect(await exists(join(localDir, "skills", "test-baselining", "SKILL.md"))).toBe(true);
@@ -309,7 +385,7 @@ describe("TestBaseliningPlugin", () => {
         JSON.stringify({ $schema: "https://opencode.ai/config.json", plugins: [PACKAGE_NAME] }, null, 2)
       );
 
-      await invokeConfigHook(fixtureDir);
+      await invokeLoadCycle("both-scopes", fixtureDir);
 
       expect(await exists(join(SANDBOX_GLOBAL_BASE, `${PACKAGE_NAME}.manifest.json`))).toBe(true);
       expect(await exists(join(SANDBOX_GLOBAL_BASE, "skills", "test-baselining", "SKILL.md"))).toBe(true);
@@ -332,13 +408,13 @@ describe("TestBaseliningPlugin", () => {
         join(localDir, "opencode.json"),
         JSON.stringify({ $schema: "https://opencode.ai/config.json", plugins: [PACKAGE_NAME] }, null, 2)
       );
-      await invokeConfigHook(fixtureDir);
+      await invokeLoadCycle("local-drift-1", fixtureDir);
       const manifestPath = join(localDir, `${PACKAGE_NAME}.manifest.json`);
       const manifest = JSON.parse(await readFile(manifestPath, "utf-8")) as { version: string };
       manifest.version = "0.0.1";
       await writeFile(manifestPath, JSON.stringify(manifest, null, 2));
 
-      await invokeConfigHook(fixtureDir);
+      await invokeLoadCycle("local-drift-2", fixtureDir);
 
       const rewritten = JSON.parse(await readFile(manifestPath, "utf-8")) as { version: string };
       expect(rewritten.version).not.toBe("0.0.1");
@@ -360,7 +436,7 @@ describe("TestBaseliningPlugin", () => {
       );
       await writeFile(join(localDir, "opencode.json"), configContent);
 
-      await invokeConfigHook(fixtureDir);
+      await invokeLoadCycle("global-local-foreign", fixtureDir);
 
       expect(await readFile(join(localDir, "opencode.json"), "utf-8")).toBe(configContent);
       expect(await exists(join(localDir, "skills"))).toBe(false);
@@ -379,14 +455,14 @@ describe("TestBaseliningPlugin", () => {
         '{\n  "$schema": "https://opencode.ai/config.json",\n  "plugins": [\n    "opencode-architect"\n  ],\n}';
       await writeFile(join(localDir, "opencode.json"), invalidContent);
 
-      await invokeConfigHook(fixtureDir);
+      await invokeLoadCycle("global-invalid-local", fixtureDir);
 
       expect(await readFile(join(localDir, "opencode.json"), "utf-8")).toBe(invalidContent);
       expect(await exists(join(localDir, "skills"))).toBe(false);
     });
   });
 
-  test("merges non-plugin local overrides in memory only", async () => {
+  test("foreign-plugin local config: zero writes, config file preserved, task ruleset still seeded", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       const fixtureDir = await makeFixture("merge-overrides-repo");
@@ -403,22 +479,16 @@ describe("TestBaseliningPlugin", () => {
       );
       await writeFile(join(localDir, "opencode.json"), configContent);
 
-      const input = {} as Record<string, unknown>;
-      await invokeConfigHook(fixtureDir, input);
+      const registry = await invokeLoadCycle("merge-overrides", fixtureDir);
 
       expect(await readFile(join(localDir, "opencode.json"), "utf-8")).toBe(configContent);
-      expect(input["model"]).toBe("some/model");
-      expect(input["$schema"]).toBe("https://opencode.ai/config.json");
-      expect(input["plugins"]).toBeUndefined();
-      expect(input["plugin"]).toBeUndefined();
-      expectSkillPermissions(input);
+      expectSkillPermissions(registry);
     });
   });
 
-  test("writes schema-compatible task skill permissions", async () => {
-    const input = {} as Record<string, unknown>;
-    await invokeConfigHook(TEST_DIR, input);
-    expectSkillPermissions(input);
+  test("registers the task agent skill ruleset in memory", async () => {
+    const registry = await invokeLoadCycle("task-ruleset", TEST_DIR);
+    expectSkillPermissions(registry);
   });
 });
 
@@ -474,7 +544,7 @@ const REPRO_SCENARIOS: ReproScenario[] = [
   },
 ];
 
-describe("config hook repro scenarios ported from qcgates-repro", () => {
+describe("load cycle repro scenarios ported from qcgates-repro", () => {
   const scenariosDir = join(import.meta.dirname, ".test-scenarios");
 
   beforeAll(async () => {
@@ -487,7 +557,7 @@ describe("config hook repro scenarios ported from qcgates-repro", () => {
   });
 
   for (const scenario of REPRO_SCENARIOS) {
-    test(`scenario ${scenario.name} produces zero repo disk writes from the config hook`, async () => {
+    test(`scenario ${scenario.name} produces zero repo disk writes from the load cycle`, async () => {
       await withGlobalSandbox(async () => {
         await resetGlobalConfig();
         const fixtureDir = join(scenariosDir, scenario.name);
@@ -495,7 +565,7 @@ describe("config hook repro scenarios ported from qcgates-repro", () => {
         await scenario.setup(fixtureDir);
 
         const before = await snapshotDirectory(fixtureDir);
-        await invokeConfigHook(fixtureDir);
+        await invokeLoadCycle(`scenario-${scenario.name}`, fixtureDir);
         const after = await snapshotDirectory(fixtureDir);
 
         expect(after).toEqual(before);
@@ -503,68 +573,34 @@ describe("config hook repro scenarios ported from qcgates-repro", () => {
     });
   }
 
-  test("scenario E control still receives in-memory task skill permissions", async () => {
+  test("scenario E control still receives the in-memory task skill ruleset", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       const fixtureDir = join(scenariosDir, "E-control-repo-up-to-date-local");
-      const input = {} as Record<string, unknown>;
-      await invokeConfigHook(fixtureDir, input);
-      expectSkillPermissions(input);
+      const registry = await invokeLoadCycle("scenario-E-control", fixtureDir);
+      expectSkillPermissions(registry);
     });
   });
 });
 
-interface CapturedAdvisory {
-  logs: Array<{ body?: { service?: string; level?: string; message?: string } }>;
-  toasts: Array<{ body?: { title?: string; message?: string; variant?: string; duration?: number } }>;
-}
-
-function makeCapturingClient(): { client: unknown; captured: CapturedAdvisory } {
-  const captured: CapturedAdvisory = { logs: [], toasts: [] };
-  const client = {
-    app: {
-      log: async (input: { body: { service: string; level: string; message: string } }) => {
-        captured.logs.push(input);
-      },
-    },
-    tui: {
-      showToast: async (input: { body: { title: string; message: string; variant: string; duration: number } }) => {
-        captured.toasts.push(input);
-      },
-    },
-  };
-  return { client, captured };
-}
-
-async function invokeConfigHookWithClient(
-  fixtureDir: string,
-  client: unknown,
-  input: Record<string, unknown> = {}
-): Promise<void> {
-  // @ts-ignore - PluginInput requires full context, we only need directory and client
-  const pluginResult = await plugin({ directory: fixtureDir, client });
-  // @ts-ignore - config returns async function that takes Config argument
-  await (pluginResult.config as ((input: unknown) => Promise<void>) | undefined)?.(input);
-}
-
 describe("install advisory (one-shot)", () => {
-  test("nothing installed anywhere: emits exactly one warn log and one warning toast, zero writes", async () => {
+  test("nothing installed anywhere: emits exactly one warn and zero writes", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       const fixtureDir = await makeFixture("advisory-fires");
-      const { client, captured } = makeCapturingClient();
+      const { warnings, restore } = captureConsoleWarnings();
       const before = await snapshotDirectory(fixtureDir);
 
-      await invokeConfigHookWithClient(fixtureDir, client);
+      try {
+        await invokeLoadCycle("advisory-fires", fixtureDir);
 
-      expect(await snapshotDirectory(fixtureDir)).toEqual(before);
-      expect(captured.logs.length).toBe(1);
-      expect(captured.logs[0]?.body?.service).toBe(PACKAGE_NAME);
-      expect(captured.logs[0]?.body?.level).toBe("warn");
-      expect(captured.logs[0]?.body?.message).toContain("bunx opencode-auto-qcgates install --scope global");
-      expect(captured.toasts.length).toBe(1);
-      expect(captured.toasts[0]?.body?.variant).toBe("warning");
-      expect(captured.toasts[0]?.body?.message).toContain("bunx opencode-auto-qcgates install --scope global");
+        expect(await snapshotDirectory(fixtureDir)).toEqual(before);
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0]).toContain("is not installed in any scope");
+        expect(warnings[0]).toContain("bunx opencode-auto-qcgates install --scope global");
+      } finally {
+        restore();
+      }
     });
   });
 
@@ -572,17 +608,19 @@ describe("install advisory (one-shot)", () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       const fixtureDir = await makeFixture("advisory-once-per-session");
-      const { client, captured } = makeCapturingClient();
+      const { warnings, restore } = captureConsoleWarnings();
 
-      // @ts-ignore - PluginInput requires full context, we only need directory and client
-      const pluginResult = await plugin({ directory: fixtureDir, client });
-      const config = pluginResult.config as ((input: unknown) => Promise<void>) | undefined;
-      await config?.({});
-      await config?.({});
-      await config?.({});
+      try {
+        const module = await loadPluginSession("advisory-once");
+        const definition = module.default;
+        await runLoadCycle(definition, fixtureDir, makeAgentRegistry());
+        await runLoadCycle(definition, fixtureDir, makeAgentRegistry());
+        await runLoadCycle(definition, fixtureDir, makeAgentRegistry());
 
-      expect(captured.logs.length).toBe(1);
-      expect(captured.toasts.length).toBe(1);
+        expect(warnings.filter(w => w.includes("is not installed in any scope"))).toHaveLength(1);
+      } finally {
+        restore();
+      }
     });
   });
 
@@ -598,19 +636,22 @@ describe("install advisory (one-shot)", () => {
       );
       await install("local", fixtureDir, { addPluginConfig: false, migrateRootConfig: false, force: false });
 
-      const { client, captured } = makeCapturingClient();
+      const { warnings, restore } = captureConsoleWarnings();
       const before = await snapshotDirectory(fixtureDir);
-      await invokeConfigHookWithClient(fixtureDir, client);
+      try {
+        await invokeLoadCycle("advisory-suppressed", fixtureDir);
 
-      expect(captured.logs.length).toBe(0);
-      expect(captured.toasts.length).toBe(0);
-      expect(await snapshotDirectory(fixtureDir)).toEqual(before);
+        expect(warnings).toHaveLength(0);
+        expect(await snapshotDirectory(fixtureDir)).toEqual(before);
+      } finally {
+        restore();
+      }
     });
   });
 });
 
 describe("failure advisory (one-shot)", () => {
-  test("three failing hook invocations emit exactly one failure advisory, and the D5 advisory still fires independently in a later session", async () => {
+  test("three failing load cycles emit exactly one failure advisory, and the D5 advisory still fires independently in a later session", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       await writeGlobalPluginConfig([PACKAGE_NAME]);
@@ -618,41 +659,34 @@ describe("failure advisory (one-shot)", () => {
       await mkdir(SANDBOX_GLOBAL_BASE, { recursive: true });
       await writeFile(join(SANDBOX_GLOBAL_BASE, "skills"), "not a directory");
 
-      const { client, captured } = makeCapturingClient();
-      // @ts-ignore - PluginInput requires full context, we only need directory and client
-      const failingPlugin = await plugin({ directory: failingDir, client });
-      const failingConfig = failingPlugin.config as ((input: unknown) => Promise<void>) | undefined;
+      const { warnings, restore } = captureConsoleWarnings();
+      try {
+        const failingModule = await loadPluginSession("failure-once");
+        const failingDefinition = failingModule.default;
+        await runLoadCycle(failingDefinition, failingDir, makeAgentRegistry());
+        await runLoadCycle(failingDefinition, failingDir, makeAgentRegistry());
+        await runLoadCycle(failingDefinition, failingDir, makeAgentRegistry());
 
-      await failingConfig?.({});
-      await failingConfig?.({});
-      await failingConfig?.({});
+        const failureWarnings = warnings.filter(w => w.includes("startup self-ensure failed"));
+        expect(failureWarnings).toHaveLength(1);
+        expect(failureWarnings[0]).toContain("bunx opencode-auto-qcgates install --scope global");
 
-      expect(captured.logs.length).toBe(1);
-      expect(captured.logs[0]?.body?.level).toBe("warn");
-      expect(captured.logs[0]?.body?.message).toContain("startup self-ensure failed");
-      expect(captured.toasts.length).toBe(1);
-      expect(captured.toasts[0]?.body?.message).toContain("startup self-ensure failed");
+        await resetGlobalConfig();
+        const freshDir = await makeFixture("failure-advisory-d5-independent");
+        const freshModule = await loadPluginSession("failure-d5-later");
+        await runLoadCycle(freshModule.default, freshDir, makeAgentRegistry());
 
-      await resetGlobalConfig();
-      const freshDir = await makeFixture("failure-advisory-d5-independent");
-      const { client: freshClient, captured: freshCaptured } = makeCapturingClient();
-      // @ts-ignore - PluginInput requires full context, we only need directory and client
-      const freshPlugin = await plugin({ directory: freshDir, client: freshClient });
-      const freshConfig = freshPlugin.config as ((input: unknown) => Promise<void>) | undefined;
-
-      await freshConfig?.({});
-
-      expect(freshCaptured.logs.length).toBe(1);
-      expect(freshCaptured.logs[0]?.body?.level).toBe("warn");
-      expect(freshCaptured.logs[0]?.body?.message).toContain("is not installed in any scope");
-      expect(freshCaptured.toasts.length).toBe(1);
-      expect(freshCaptured.toasts[0]?.body?.message).toContain("is not installed in any scope");
+        const d5Warnings = warnings.filter(w => w.includes("is not installed in any scope"));
+        expect(d5Warnings).toHaveLength(1);
+      } finally {
+        restore();
+      }
     });
   });
 });
 
 describe("legacy singular plugin key upgrade advisory", () => {
-  test("a legacy-only repo: the config hook fires the upgrade advisory once and performs zero writes", async () => {
+  test("a legacy-only repo: the load cycle fires the upgrade advisory once and performs zero writes", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       const fixtureDir = await makeFixture("legacy-hook-advisory");
@@ -667,8 +701,8 @@ describe("legacy singular plugin key upgrade advisory", () => {
         warnings.push(String(message));
       });
       try {
-        await invokeConfigHook(fixtureDir);
-        await invokeConfigHook(fixtureDir);
+        await invokeLoadCycle("legacy-1", fixtureDir);
+        await invokeLoadCycle("legacy-2", fixtureDir);
       } finally {
         warn.mockRestore();
       }
@@ -681,7 +715,7 @@ describe("legacy singular plugin key upgrade advisory", () => {
     });
   });
 
-  test("a v2 plugins registration alongside a legacy key: hook ensures assets, keeps both keys, and advises once", async () => {
+  test("a v2 plugins registration alongside a legacy key: load ensures assets, keeps both keys, and advises once", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       const fixtureDir = await makeFixture("both-keys-hook");
@@ -702,7 +736,7 @@ describe("legacy singular plugin key upgrade advisory", () => {
         warnings.push(String(message));
       });
       try {
-        await invokeConfigHook(fixtureDir);
+        await invokeLoadCycle("both-keys", fixtureDir);
       } finally {
         warn.mockRestore();
       }

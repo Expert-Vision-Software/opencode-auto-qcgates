@@ -96,11 +96,11 @@ The `src/` list above is not exhaustive — additional modules may appear as the
 - **Local** (default): copies to `{project}/.opencode/skills/` and updates `{project}/.opencode/opencode.json`.
 - **Global**: copies to `~/.config/opencode/skills/` and updates `~/.config/opencode/opencode.json`.
 
-It also pre-grants `permission.skill: "allow"` for `test-baselining` and `regression-checking` skills and writes `<package>.manifest.json` — the installed version plus per-file sha256 hashes — to skip re-install on subsequent loads.
+It also writes `<package>.manifest.json` — the installed version plus per-file sha256 hashes — to skip re-install on subsequent loads. At load time the plugin pre-grants the task agent's v2 permission ruleset — `permissions: [{ action: "skill", resource: "<skill>", effect: "allow" }]` for `test-baselining`, `regression-checking`, and `grilling` — in memory through the agent domain.
 
 ### Plugin auto-install
 
-When OpenCode loads the package via the `opencode.json` `plugin` array, `src/plugin.ts` detects the registration scope and installs only into scopes that already reference the package — so the package auto-installs skills on first use if not already installed.
+When OpenCode loads the package via the `opencode.json` `plugins` array, `src/plugin.ts` detects the registration scope at load time and installs only into scopes that already reference the package — so the package auto-installs skills on first use if not already installed.
 
 ### Scope detection
 
@@ -113,7 +113,7 @@ Each base is probed for both `opencode.json` and `opencode.jsonc` through `isPlu
 
 ### Local overrides
 
-When a local installation exists alongside a global one, the local configuration takes priority. The `mergeConfigWithOverrides()` function merges local config into the input, excluding `plugin` and `agent` keys (which are managed separately by the installer).
+When a local installation exists alongside a global one, the local configuration takes priority. Under OpenCode v2 the host merges config roots itself (global → explicit → direct → project); the plugin performs no in-memory merge of local config.
 
 ## Coding rules
 
