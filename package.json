@@ -4,6 +4,10 @@
   "description": "Test execution, baseline management, and threshold evaluation for quality gates.",
   "type": "module",
   "module": "index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./server": "./index.ts"
+  },
   "sideEffects": false,
   "content": "code",
   "engines": {
