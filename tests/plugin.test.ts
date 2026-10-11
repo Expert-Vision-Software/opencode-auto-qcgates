@@ -186,7 +186,7 @@ describe("TestBaseliningPlugin", () => {
       expect(captured.logs[0]?.body?.message).toContain("bunx opencode-auto-qcgates install --scope global");
       expect(captured.toasts[0]?.body?.message).toContain("bunx opencode-auto-qcgates install --scope global");
       expect(captured.logs[0]?.body?.message).toContain(
-        `opencode/packages/${PACKAGE_NAME}@`
+        `opencode/npm/${PACKAGE_NAME}@`
       );
       expectSkillPermissions(input);
     });

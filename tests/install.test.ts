@@ -345,13 +345,13 @@ describe("cache-rot error text", () => {
       "/cache/node_modules/opencode-auto-qcgates/skills",
       "opencode-auto-qcgates",
       "1.5.0",
-      "/home/user/.cache/opencode/packages"
+      "/home/user/.cache/opencode/npm"
     );
     expect(error.message).toContain("/cache/node_modules/opencode-auto-qcgates/skills");
     expect(error.message).toContain("opencode-auto-qcgates");
     expect(error.message).toContain("1.5.0");
     expect(error.message).toContain(
-      "/home/user/.cache/opencode/packages/opencode-auto-qcgates@1.5.0"
+      "/home/user/.cache/opencode/npm/opencode-auto-qcgates@1.5.0"
     );
     expect(error.message).toContain("bunx opencode-auto-qcgates clear-cache");
     expect(error.message).toContain("bunx opencode-auto-qcgates install --scope global");
@@ -733,7 +733,7 @@ describe("legacy manifest backward compatibility", () => {
 });
 
 describe("CacheCleaner self-scoped pruning", () => {
-  const CACHE_ROOT = join(SANDBOX_CACHE, "opencode", "packages");
+  const CACHE_ROOT = join(SANDBOX_CACHE, "opencode", "npm");
 
   async function seedCache(): Promise<void> {
     process.env.XDG_CACHE_HOME = SANDBOX_CACHE;

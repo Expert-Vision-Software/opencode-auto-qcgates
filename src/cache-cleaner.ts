@@ -11,9 +11,9 @@ export class CacheCleaner {
   packagesCacheRoot(): string {
     const xdgCacheHome = process.env.XDG_CACHE_HOME;
     if (xdgCacheHome) {
-      return join(xdgCacheHome, "opencode", "packages");
+      return join(xdgCacheHome, "opencode", "npm");
     }
-    return join(homedir(), ".cache", "opencode", "packages");
+    return join(homedir(), ".cache", "opencode", "npm");
   }
 
   packagesCacheRootDisplay(): string {
