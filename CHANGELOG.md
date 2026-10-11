@@ -5,7 +5,7 @@ All notable changes to `opencode-auto-qcgates` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.8.0] - 2026-10-11
 
 ### Changed
 - **v2-native plugin definition** — `src/plugin.ts` now exports `Plugin.define({ id, effect })` built with `@opencode/plugin/effect` (the v1 factory/hooks shape fails to load under an OpenCode v2 host). The launch directory comes from `context.location.directory`; the effect's error channel stays `never` (ADR 0007): any failure degrades to a single console-warn advisory naming the remediation command and the package-qualified `opencode/npm` cache path. Permission seeding writes the v2 ordered ruleset array on the task agent (`permissions: [{ action: "skill", resource, effect: "allow" }]`) instead of the v1 `permission.skill` keyed record, preserving foreign rules. The v1 in-memory local-overrides merge is dropped — the v2 host merges config roots itself.
@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Dependencies
 - Add `@opencode/plugin` (`latest`) and `effect` (aligned to the authoring package's `4.0.0-rc.112` so a single Effect copy resolves tree-wide; forcing stable `4.0.2` breaks `@opencode/schema` at runtime); remove `@opencode-ai/plugin`.
+
+## [Unreleased]
 
 ## [1.7.0] - 2026-10-05
 
