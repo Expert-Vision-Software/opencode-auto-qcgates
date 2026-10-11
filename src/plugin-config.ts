@@ -1,7 +1,8 @@
 import { exists, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { PluginNameNormalizer } from "./plugin-name.ts";
+import { PluginEntryResolver, type ConfigPluginEntry } from "./plugin-entry.ts";
 import { legacyPluginKeyAdvisor } from "./legacy-config-advisory.ts";
 
 export type ConfigScope = "local" | "global";
@@ -32,8 +33,8 @@ interface CandidateConfig {
 interface CandidateRead {
   candidate: CandidateConfig;
   text: string;
-  plugins: string[] | null;
-  legacyPlugins: string[];
+  plugins: ConfigPluginEntry[] | null;
+  legacyPlugins: ConfigPluginEntry[];
 }
 
 interface PluginArrayRange {
@@ -42,6 +43,8 @@ interface PluginArrayRange {
 }
 
 const PLUGIN_ARRAY_KEY = '"plugins"';
+
+const pluginEntryResolver = new PluginEntryResolver();
 
 const DEFAULT_CONFIG_TEMPLATE = `{
   "$schema": "https://opencode.ai/config.json",
@@ -56,10 +59,10 @@ export class PluginConfigEditor {
   ): Promise<EnsurePluginEntryOutcome> {
     const canonical = PluginNameNormalizer.canonicalize(packageName);
     const reads = await this.readCandidates(options);
-    this.adviseLegacyRegistrations(reads, packageName);
+    await this.adviseLegacyRegistrations(reads, packageName);
 
     for (const { candidate, plugins } of reads) {
-      if (plugins !== null && this.hasMatchingEntry(plugins, packageName)) {
+      if (plugins !== null && (await this.hasSemanticEntry(plugins, packageName, dirname(candidate.path)))) {
         return { action: "noop", configPath: candidate.path, warning: null };
       }
     }
@@ -75,7 +78,13 @@ export class PluginConfigEditor {
           warning: this.parseFailureWarning(candidate.path),
         };
       }
-      const spliced = this.spliceEntry(text, canonical, packageName, candidate.lenient);
+      const spliced = await this.spliceEntry(
+        text,
+        canonical,
+        packageName,
+        candidate.lenient,
+        dirname(candidate.path)
+      );
       if (spliced === null) {
         return {
           action: "blocked",
@@ -131,16 +140,24 @@ export class PluginConfigEditor {
     return { action: "noop", configPath: null, warning: null };
   }
 
-  private adviseLegacyRegistrations(reads: CandidateRead[], packageName: string): void {
+  private async adviseLegacyRegistrations(reads: CandidateRead[], packageName: string): Promise<void> {
     for (const { candidate, legacyPlugins } of reads) {
-      if (legacyPlugins.some(entry => PluginNameNormalizer.matches(entry, packageName))) {
+      if (await this.hasSemanticEntry(legacyPlugins, packageName, dirname(candidate.path))) {
         legacyPluginKeyAdvisor.advise(candidate.path, packageName);
       }
     }
   }
 
-  private hasMatchingEntry(entries: string[], packageName: string): boolean {
-    return entries.some(entry => PluginNameNormalizer.matches(entry, packageName));
+  private hasMatchingEntry(entries: ConfigPluginEntry[], packageName: string): boolean {
+    return entries.some(entry => typeof entry === "string" && PluginNameNormalizer.matches(entry, packageName));
+  }
+
+  private async hasSemanticEntry(
+    entries: ConfigPluginEntry[],
+    packageName: string,
+    baseDir: string | null
+  ): Promise<boolean> {
+    return pluginEntryResolver.matchesAny(entries, packageName, baseDir);
   }
 
   private parseFailureWarning(configPath: string): string {
@@ -203,27 +220,29 @@ export class PluginConfigEditor {
     return join(homedir(), ".config", "opencode");
   }
 
-  private parsePluginArray(text: string, lenient: boolean): string[] | null {
+  private parsePluginArray(text: string, lenient: boolean): ConfigPluginEntry[] | null {
     const config = this.parseConfig(text, lenient);
     if (config === null) {
       return null;
     }
-    return this.stringEntries(config["plugins"]);
+    return this.pluginEntries(config["plugins"]);
   }
 
-  private parseLegacyPluginArray(text: string, lenient: boolean): string[] {
+  private parseLegacyPluginArray(text: string, lenient: boolean): ConfigPluginEntry[] {
     const config = this.parseConfig(text, lenient);
     if (config === null) {
       return [];
     }
-    return this.stringEntries(config["plugin"]);
+    return this.pluginEntries(config["plugin"]);
   }
 
-  private stringEntries(value: unknown): string[] {
+  private pluginEntries(value: unknown): ConfigPluginEntry[] {
     if (!Array.isArray(value)) {
       return [];
     }
-    return value.filter((entry): entry is string => typeof entry === "string");
+    return value.filter(
+      (entry): entry is ConfigPluginEntry => typeof entry === "string" || (typeof entry === "object" && entry !== null)
+    );
   }
 
   private parseConfig(text: string, lenient: boolean): Record<string, unknown> | null {
@@ -299,12 +318,13 @@ export class PluginConfigEditor {
     return chars.join("");
   }
 
-  private spliceEntry(
+  private async spliceEntry(
     text: string,
     canonicalEntry: string,
     packageName: string,
-    lenient: boolean
-  ): string | null {
+    lenient: boolean,
+    baseDir: string | null
+  ): Promise<string | null> {
     const navigable = this.blankComments(text);
     const range = this.findPluginArrayRange(navigable);
     const spliced =
@@ -315,7 +335,7 @@ export class PluginConfigEditor {
       return null;
     }
     const plugins = this.parsePluginArray(spliced, lenient);
-    if (plugins === null || !this.hasMatchingEntry(plugins, packageName)) {
+    if (plugins === null || !(await this.hasSemanticEntry(plugins, packageName, baseDir))) {
       return null;
     }
     return spliced;

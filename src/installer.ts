@@ -2,6 +2,7 @@ import { copyFile, exists, mkdir, readdir, readFile, rm, writeFile } from "node:
 import { homedir } from "node:os";
 import { dirname, join, basename } from "node:path";
 import { PluginNameNormalizer } from "./plugin-name.ts";
+import { PluginEntryResolver, type ConfigPluginEntry } from "./plugin-entry.ts";
 import { InstallManifest, type InstallMode, type ManifestFileEntry } from "./manifest.ts";
 import {
   loadPackageManifest,
@@ -84,6 +85,7 @@ const ASSET_PAYLOAD_DIRS: string[] = ["skills", "commands"];
 
 const pluginConfigEditor = new PluginConfigEditor();
 const cacheCleaner = new CacheCleaner();
+const pluginEntryResolver = new PluginEntryResolver();
 
 export function printRecommendations(recommendations: string[]): void {
   for (const recommendation of recommendations) {
@@ -409,8 +411,8 @@ async function writeJsonConfig(path: string, config: Record<string, unknown>): P
 }
 
 interface PluginKeyEntries {
-  v2Entries: string[];
-  legacyEntries: string[];
+  v2Entries: ConfigPluginEntry[];
+  legacyEntries: ConfigPluginEntry[];
 }
 
 async function readPluginKeyEntries(configPath: string): Promise<PluginKeyEntries | null> {
@@ -432,16 +434,23 @@ async function readPluginKeyEntries(configPath: string): Promise<PluginKeyEntrie
     return null;
   }
   return {
-    v2Entries: stringEntries(config["plugins"]),
-    legacyEntries: stringEntries(config["plugin"]),
+    v2Entries: pluginEntries(config["plugins"]),
+    legacyEntries: pluginEntries(config["plugin"]),
   };
 }
 
-function stringEntries(value: unknown): string[] {
+function pluginEntries(value: unknown): ConfigPluginEntry[] {
   if (!Array.isArray(value)) {
     return [];
   }
-  return value.filter((entry): entry is string => typeof entry === "string");
+  return value.filter(isConfigPluginEntry);
+}
+
+function isConfigPluginEntry(value: unknown): value is ConfigPluginEntry {
+  if (typeof value === "string") {
+    return true;
+  }
+  return typeof value === "object" && value !== null;
 }
 
 export async function isPluginInConfigBase(
@@ -454,10 +463,10 @@ export async function isPluginInConfigBase(
     if (read === null) {
       continue;
     }
-    if (read.v2Entries.some(entry => PluginNameNormalizer.matches(entry, packageName))) {
+    if (await pluginEntryResolver.matchesAny(read.v2Entries, packageName, dirname(candidate))) {
       registered = true;
     }
-    if (read.legacyEntries.some(entry => PluginNameNormalizer.matches(entry, packageName))) {
+    if (await pluginEntryResolver.matchesAny(read.legacyEntries, packageName, dirname(candidate))) {
       legacyPluginKeyAdvisor.advise(candidate, packageName);
     }
   }
@@ -828,7 +837,7 @@ async function isRecordedEntryPresent(configPath: string, packageName: string): 
   if (read === null) {
     return false;
   }
-  return read.v2Entries.some(entry => PluginNameNormalizer.matches(entry, packageName));
+  return pluginEntryResolver.matchesAny(read.v2Entries, packageName, dirname(configPath));
 }
 
 export async function detectAurelia(projectDir: string): Promise<AureliaRecommendation> {

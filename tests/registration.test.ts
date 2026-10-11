@@ -1,6 +1,7 @@
 import { describe, test, expect, spyOn } from "bun:test";
 import { join } from "node:path";
-import { mkdir, rm, readFile, writeFile } from "node:fs/promises";
+import { mkdir, rm, readFile, symlink, writeFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import { RegistrationDetector, type RegistrationContext } from "../src/registration.ts";
 import { install } from "../src/installer.ts";
 import { snapshotDirectory } from "./snapshot.ts";
@@ -402,6 +403,108 @@ describe("RegistrationDetector read-only hardening", () => {
       } finally {
         warn.mockRestore();
       }
+    });
+  });
+});
+
+describe("path-form entry detection (B2/C1)", () => {
+  const LEGACY_ADVISORY_MARKER = "legacy and inert under OpenCode v2";
+
+  async function makeScratchPackage(name: string, pkgName: string): Promise<string> {
+    const scratchDir = join(TEST_DIR, name);
+    await rm(scratchDir, { recursive: true, force: true });
+    await mkdir(scratchDir, { recursive: true });
+    await writeFile(join(scratchDir, "package.json"), JSON.stringify({ name: pkgName, version: "1.0.0" }));
+    await writeFile(join(scratchDir, "index.ts"), "export default {};\n");
+    return scratchDir;
+  }
+
+  async function writeNestedRawConfig(fixtureDir: string, content: string): Promise<string> {
+    const localDir = join(fixtureDir, ".opencode");
+    await mkdir(localDir, { recursive: true });
+    const configPath = join(localDir, "opencode.json");
+    await writeFile(configPath, content);
+    return configPath;
+  }
+
+  async function detectSilently(fixtureDir: string): Promise<{ context: RegistrationContext; warnings: string[] }> {
+    const warnings: string[] = [];
+    const warn = spyOn(console, "warn").mockImplementation((message: unknown) => {
+      warnings.push(String(message));
+    });
+    try {
+      const context = await RegistrationDetector.detect(fixtureDir);
+      return { context, warnings };
+    } finally {
+      warn.mockRestore();
+    }
+  }
+
+  test("returns repo-local for a file:// URL entry resolving to this package", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("path-url-detect");
+      const scratch = await makeScratchPackage("detect-scratch-url", PACKAGE_NAME);
+      const url = pathToFileURL(scratch).href;
+      await writeNestedRawConfig(fixtureDir, `{\n  "plugins": ["${url}"]\n}\n`);
+      const { context, warnings } = await detectSilently(fixtureDir);
+      expect(context).toBe("repo-local");
+      expect(warnings.join("\n")).not.toContain(LEGACY_ADVISORY_MARKER);
+    });
+  });
+
+  test("returns repo-local for an object-form { package } path entry", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("path-object-detect");
+      const scratch = await makeScratchPackage("detect-scratch-object", PACKAGE_NAME);
+      const url = pathToFileURL(scratch).href;
+      await writeNestedRawConfig(fixtureDir, `{\n  "plugins": [{ "package": "${url}" }]\n}\n`);
+      const { context } = await detectSilently(fixtureDir);
+      expect(context).toBe("repo-local");
+    });
+  });
+
+  test("returns repo-local for a symlinked entrypoint path entry", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("path-symlink-detect");
+      const scratch = await makeScratchPackage("detect-scratch-symlink", PACKAGE_NAME);
+      const linkPath = join(TEST_DIR, "detect-scratch-symlink-link.ts");
+      await rm(linkPath, { force: true });
+      await symlink(join(scratch, "index.ts"), linkPath);
+      await writeNestedRawConfig(fixtureDir, `{\n  "plugins": ["${linkPath}"]\n}\n`);
+      try {
+        const { context } = await detectSilently(fixtureDir);
+        expect(context).toBe("repo-local");
+      } finally {
+        await rm(linkPath, { force: true });
+      }
+    });
+  });
+
+  test("returns none for an unresolvable path entry without throwing", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("path-unresolvable-detect");
+      await writeNestedRawConfig(fixtureDir, `{\n  "plugins": ["/nonexistent-qcgates-missing-dir"]\n}\n`);
+      const { context, warnings } = await detectSilently(fixtureDir);
+      expect(context).toBe("none");
+      expect(warnings.join("\n")).not.toContain(LEGACY_ADVISORY_MARKER);
+    });
+  });
+
+  test("a legacy singular plugin path entry stays unregistered but triggers the advisory", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("path-legacy-advisory");
+      const scratch = await makeScratchPackage("detect-scratch-legacy", PACKAGE_NAME);
+      const url = pathToFileURL(scratch).href;
+      const configPath = await writeNestedRawConfig(fixtureDir, `{\n  "plugin": ["${url}"]\n}\n`);
+      const { context, warnings } = await detectSilently(fixtureDir);
+      expect(context).toBe("none");
+      expect(warnings.join("\n")).toContain(LEGACY_ADVISORY_MARKER);
+      expect(await readFile(configPath, "utf-8")).toBe(`{\n  "plugin": ["${url}"]\n}\n`);
     });
   });
 });

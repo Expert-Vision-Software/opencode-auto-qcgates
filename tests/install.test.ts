@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeAll, afterAll } from "bun:test";
 import { join } from "node:path";
-import { exists, mkdir, rm, readFile, writeFile } from "node:fs/promises";
+import { exists, mkdir, mkdtemp, rm, readFile, symlink, writeFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
 import {
   getContentDeclaration,
   install,
@@ -13,6 +14,7 @@ import {
   uninstall,
 } from "../src/installer.ts";
 import { PluginNameNormalizer } from "../src/plugin-name.ts";
+import { PluginEntryResolver } from "../src/plugin-entry.ts";
 import { InstallManifest } from "../src/manifest.ts";
 import { BundledAssetsMissingError } from "../src/bundled-assets-missing-error.ts";
 import { CopyModeUnsupportedError } from "../src/copy-mode-unsupported-error.ts";
@@ -904,5 +906,248 @@ describe("CacheCleaner self-scoped pruning", () => {
     const outcome = await cleaner.clearPackageCache("opencode-auto-qcgates");
     expect(outcome.removed).toEqual([]);
     expect(outcome.warnings).toEqual([]);
+  });
+});
+
+describe("PluginEntryResolver", () => {
+  const resolver = new PluginEntryResolver();
+
+  async function makeScratchPackage(name: string, pkgName: string): Promise<string> {
+    const scratchDir = join(TEST_DIR, name);
+    await rm(scratchDir, { recursive: true, force: true });
+    await mkdir(scratchDir, { recursive: true });
+    await writeFile(join(scratchDir, "package.json"), JSON.stringify({ name: pkgName, version: "1.0.0" }));
+    await writeFile(join(scratchDir, "index.ts"), "export default {};\n");
+    return scratchDir;
+  }
+
+  test("isPathForm accepts file URLs and filesystem paths and rejects package names", () => {
+    expect(resolver.isPathForm("file:///tmp/pkg")).toBe(true);
+    expect(resolver.isPathForm("/tmp/pkg")).toBe(true);
+    expect(resolver.isPathForm("./pkg")).toBe(true);
+    expect(resolver.isPathForm("../pkg")).toBe(true);
+    expect(resolver.isPathForm("~/pkg")).toBe(true);
+    expect(resolver.isPathForm({ package: "/tmp/pkg" })).toBe(true);
+    expect(resolver.isPathForm(PACKAGE_NAME)).toBe(false);
+    expect(resolver.isPathForm(CANONICAL_PLUGIN_REF)).toBe(false);
+    expect(resolver.isPathForm(`${PACKAGE_NAME}@1.2.0`)).toBe(false);
+    expect(resolver.isPathForm("@scope/some-plugin@2.0.0")).toBe(false);
+    expect(resolver.isPathForm({ package: PACKAGE_NAME })).toBe(false);
+    expect(resolver.isPathForm({ package: 42 })).toBe(false);
+  });
+
+  test("resolves a file:// URL directory to its package name", async () => {
+    const scratch = await makeScratchPackage("resolver-url-dir", PACKAGE_NAME);
+    expect(await resolver.resolvePackageName(pathToFileURL(scratch).href, null)).toBe(PACKAGE_NAME);
+  });
+
+  test("resolves an entrypoint file, a directory path, and a symlink to it", async () => {
+    const scratch = await makeScratchPackage("resolver-entry-symlink", PACKAGE_NAME);
+    const linkPath = join(TEST_DIR, "resolver-entry-link.ts");
+    await rm(linkPath, { force: true });
+    await symlink(join(scratch, "index.ts"), linkPath);
+    expect(await resolver.resolvePackageName(join(scratch, "index.ts"), null)).toBe(PACKAGE_NAME);
+    expect(await resolver.resolvePackageName(scratch, null)).toBe(PACKAGE_NAME);
+    expect(await resolver.resolvePackageName(linkPath, null)).toBe(PACKAGE_NAME);
+    await rm(linkPath, { force: true });
+  });
+
+  test("matches through the semantic name matcher for path and name forms alike", async () => {
+    const scratch = await makeScratchPackage("resolver-matches", PACKAGE_NAME);
+    const url = pathToFileURL(scratch).href;
+    expect(await resolver.matches(url, PACKAGE_NAME, null)).toBe(true);
+    expect(await resolver.matches({ package: url }, PACKAGE_NAME, null)).toBe(true);
+    expect(await resolver.matches(url, `${PACKAGE_NAME}@9.9.9`, null)).toBe(true);
+    expect(await resolver.matches(url, "some-other-plugin", null)).toBe(false);
+    expect(await resolver.matches(CANONICAL_PLUGIN_REF, PACKAGE_NAME, null)).toBe(true);
+    expect(await resolver.matches({ package: `${PACKAGE_NAME}@1.0.0` }, PACKAGE_NAME, null)).toBe(true);
+  });
+
+  test("reports null for unresolvable entries without throwing", async () => {
+    expect(await resolver.resolvePackageName("/nonexistent-qcgates-missing-dir", null)).toBeNull();
+    expect(await resolver.resolvePackageName(pathToFileURL("/nonexistent-qcgates-missing-dir").href, null)).toBeNull();
+    expect(await resolver.resolvePackageName("file://%ZZmalformed", null)).toBeNull();
+    expect(await resolver.resolvePackageName("file://host/shared/pkg", null)).toBeNull();
+    expect(await resolver.matches("/nonexistent-qcgates-missing-dir", PACKAGE_NAME, null)).toBe(false);
+    expect(await resolver.matches({ package: 42 }, PACKAGE_NAME, null)).toBe(false);
+  });
+
+  test("reports null for an existing directory without any package.json", async () => {
+    await mkdir("/tmp/opencode", { recursive: true });
+    const bareDir = await mkdtemp(join("/tmp/opencode", "qcgates-nopkg-"));
+    try {
+      expect(await resolver.resolvePackageName(bareDir, null)).toBeNull();
+      expect(await resolver.matches(bareDir, PACKAGE_NAME, null)).toBe(false);
+    } finally {
+      await rm(bareDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("path-form plugin entries (B2)", () => {
+  const ADD_PLUGIN_OPTIONS = { addPluginConfig: true, migrateRootConfig: false, force: false };
+
+  async function makeScratchPackage(name: string, pkgName: string): Promise<string> {
+    const scratchDir = join(TEST_DIR, name);
+    await rm(scratchDir, { recursive: true, force: true });
+    await mkdir(scratchDir, { recursive: true });
+    await writeFile(join(scratchDir, "package.json"), JSON.stringify({ name: pkgName, version: "1.0.0" }));
+    await writeFile(join(scratchDir, "index.ts"), "export default {};\n");
+    return scratchDir;
+  }
+
+  async function writeRawLocalConfig(fixtureDir: string, content: string): Promise<string> {
+    const localDir = join(fixtureDir, ".opencode");
+    await mkdir(localDir, { recursive: true });
+    const configPath = join(localDir, "opencode.json");
+    await writeFile(configPath, content);
+    return configPath;
+  }
+
+  async function readPluginEntries(fixtureDir: string): Promise<unknown[]> {
+    const config = JSON.parse(await readLocalConfigRaw(fixtureDir)) as Record<string, unknown>;
+    return (config["plugins"] as unknown[]) ?? [];
+  }
+
+  test("a file:// URL entry resolving to this package is a zero-write registration no-op", async () => {
+    const fixtureDir = await makeFixture("path-url-noop");
+    const scratch = await makeScratchPackage("scratch-pkg-url", PACKAGE_NAME);
+    const url = pathToFileURL(scratch).href;
+    const content = `{\n  "plugins": ["${url}"]\n}\n`;
+    const configPath = await writeRawLocalConfig(fixtureDir, content);
+
+    const first = await install("local", fixtureDir, ADD_PLUGIN_OPTIONS);
+    expect(first.pluginAdded).toBe(false);
+    expect(await readFile(configPath, "utf-8")).toBe(content);
+    expect(await readPluginEntries(fixtureDir)).toEqual([url]);
+    expect(await isPluginInConfigBase(join(fixtureDir, ".opencode"), PACKAGE_NAME)).toBe(true);
+
+    const before = await snapshotDirectory(fixtureDir);
+    const second = await install("local", fixtureDir, ADD_PLUGIN_OPTIONS);
+    expect(second.pluginAdded).toBe(false);
+    expect(await snapshotDirectory(fixtureDir)).toEqual(before);
+  });
+
+  test("a file:// URL entry pointing at an entrypoint file counts as registered", async () => {
+    const fixtureDir = await makeFixture("path-url-entrypoint");
+    const scratch = await makeScratchPackage("scratch-pkg-entrypoint", PACKAGE_NAME);
+    const url = pathToFileURL(join(scratch, "index.ts")).href;
+    const content = `{\n  "plugins": ["${url}"]\n}\n`;
+    const configPath = await writeRawLocalConfig(fixtureDir, content);
+
+    const result = await install("local", fixtureDir, ADD_PLUGIN_OPTIONS);
+
+    expect(result.pluginAdded).toBe(false);
+    expect(await readFile(configPath, "utf-8")).toBe(content);
+    expect(await isPluginInConfigBase(join(fixtureDir, ".opencode"), PACKAGE_NAME)).toBe(true);
+  });
+
+  test("a symlinked entrypoint path entry counts as registered", async () => {
+    const fixtureDir = await makeFixture("path-symlink-entrypoint");
+    const scratch = await makeScratchPackage("scratch-pkg-symlink", PACKAGE_NAME);
+    const linkPath = join(TEST_DIR, "scratch-pkg-symlink-link.ts");
+    await rm(linkPath, { force: true });
+    await symlink(join(scratch, "index.ts"), linkPath);
+    const content = `{\n  "plugins": ["${linkPath}"]\n}\n`;
+    const configPath = await writeRawLocalConfig(fixtureDir, content);
+
+    const result = await install("local", fixtureDir, ADD_PLUGIN_OPTIONS);
+
+    expect(result.pluginAdded).toBe(false);
+    expect(await readFile(configPath, "utf-8")).toBe(content);
+    expect(await isPluginInConfigBase(join(fixtureDir, ".opencode"), PACKAGE_NAME)).toBe(true);
+    await rm(linkPath, { force: true });
+  });
+
+  test("an object-form { package } entry with a path value counts as registered", async () => {
+    const fixtureDir = await makeFixture("path-object-form");
+    const scratch = await makeScratchPackage("scratch-pkg-object", PACKAGE_NAME);
+    const url = pathToFileURL(scratch).href;
+    const content = `{\n  "plugins": [{ "package": "${url}" }]\n}\n`;
+    const configPath = await writeRawLocalConfig(fixtureDir, content);
+
+    const result = await install("local", fixtureDir, ADD_PLUGIN_OPTIONS);
+
+    expect(result.pluginAdded).toBe(false);
+    expect(await readFile(configPath, "utf-8")).toBe(content);
+    expect(await isPluginInConfigBase(join(fixtureDir, ".opencode"), PACKAGE_NAME)).toBe(true);
+  });
+
+  test("an object-form { package } entry with the bare name counts as registered", async () => {
+    const fixtureDir = await makeFixture("path-object-name-form");
+    const content = `{\n  "plugins": [{ "package": "${PACKAGE_NAME}" }]\n}\n`;
+    const configPath = await writeRawLocalConfig(fixtureDir, content);
+
+    const result = await install("local", fixtureDir, ADD_PLUGIN_OPTIONS);
+
+    expect(result.pluginAdded).toBe(false);
+    expect(await readFile(configPath, "utf-8")).toBe(content);
+  });
+
+  test("a path entry resolving to a different package does not match and the canonical entry is added beside it", async () => {
+    const fixtureDir = await makeFixture("path-foreign-package");
+    const scratch = await makeScratchPackage("scratch-pkg-foreign", "some-other-plugin");
+    const url = pathToFileURL(scratch).href;
+    const content = `{\n  "plugins": ["${url}"]\n}\n`;
+    await writeRawLocalConfig(fixtureDir, content);
+
+    const result = await install("local", fixtureDir, ADD_PLUGIN_OPTIONS);
+
+    expect(result.pluginAdded).toBe(true);
+    const plugins = await readPluginEntries(fixtureDir);
+    expect(plugins).toContain(url);
+    expect(plugins).toContain(CANONICAL_PLUGIN_REF);
+    expect(await isPluginInConfigBase(join(fixtureDir, ".opencode"), PACKAGE_NAME)).toBe(true);
+  });
+
+  test("unresolvable path entries match nothing without throwing and install adds the canonical entry", async () => {
+    const missingDir = "/nonexistent-qcgates-missing-dir";
+    const missingUrl = pathToFileURL(missingDir).href;
+    const entries = [missingDir, missingUrl, "file://%ZZmalformed", "file://host/shared/pkg"];
+    for (const [index, entry] of entries.entries()) {
+      const fixtureDir = await makeFixture(`path-unresolvable-${index}`);
+      const content = `{\n  "plugins": ["${entry}"]\n}\n`;
+      const configPath = await writeRawLocalConfig(fixtureDir, content);
+
+      const result = await install("local", fixtureDir, ADD_PLUGIN_OPTIONS);
+
+      expect(result.pluginAdded).toBe(true);
+      const plugins = await readPluginEntries(fixtureDir);
+      expect(plugins).toContain(entry);
+      expect(plugins).toContain(CANONICAL_PLUGIN_REF);
+      expect(await readFile(configPath, "utf-8")).not.toBe(content);
+    }
+  });
+
+  test("a live path entry satisfies the up-to-date check on a version-drift manifest (B6)", async () => {
+    const fixtureDir = await makeFixture("path-entry-b6");
+    const scratch = await makeScratchPackage("scratch-pkg-b6", PACKAGE_NAME);
+    const url = pathToFileURL(scratch).href;
+    const localDir = join(fixtureDir, ".opencode");
+    await mkdir(join(localDir, "skills", "demo"), { recursive: true });
+    await writeFile(join(localDir, "skills", "demo", "SKILL.md"), "payload");
+    const configPath = join(localDir, "opencode.json");
+    const content = `{\n  "plugins": ["${url}"]\n}\n`;
+    await writeFile(configPath, content);
+    await writeFile(
+      join(localDir, `${PACKAGE_NAME}.manifest.json`),
+      JSON.stringify({
+        version: "0.0.1",
+        mode: "plugin",
+        entry: CANONICAL_PLUGIN_REF,
+        configPath,
+        files: [{ path: "skills/demo/SKILL.md", hash: "f".repeat(64) }],
+      })
+    );
+
+    expect(await isScopeInstalled(localDir, PACKAGE_NAME)).toBe(true);
+    expect((await status(fixtureDir)).local?.installed).toBe(true);
+    expect((await status(fixtureDir)).local?.pluginInConfig).toBe(true);
+
+    const result = await install("local", fixtureDir, ADD_PLUGIN_OPTIONS);
+
+    expect(result.pluginAdded).toBe(false);
+    expect(await readFile(configPath, "utf-8")).toBe(content);
+    expect((await status(fixtureDir)).local?.installed).toBe(true);
   });
 });
