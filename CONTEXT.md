@@ -99,7 +99,7 @@ The consumer's act of listing the package in an opencode config's `plugin` array
 _Avoid_: plugin entry, activation — except where the opencode-architect suite's package contract fixes the identifier (`PluginEntryResolver`, `src/plugin-entry.ts`).
 
 **Self-Ensure**:
-The plugin's on-load behavior of copying its Skill Assets into the config dir of each scope where it is registered, so config-entry installs need no separate installer run.
+The plugin's on-load behavior of copying its Skill Assets into the config dir of each scope where it is registered, so config-entry installs need no separate installer run, and of back-filling the install manifest's recorded registration (`entry`, `configPath`) from the registration it already detected — strictly read-only against the config file, so a manifest left with nulls by an older version self-heals on the next load.
 _Avoid_: auto-install, sync, bootstrap
 
 **Cache Rot**:

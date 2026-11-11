@@ -5,6 +5,11 @@ All notable changes to `opencode-auto-qcgates` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Load-time self-ensure back-fills the manifest's recorded registration** — The load-time ensure path runs with `addPluginConfig: false`, so a plugin-mode manifest whose `entry`/`configPath` were null (written manually or by an older version) inherited the nulls across every load-time rewrite, making `readScopeStatus`'s recorded-entry presence check inert and `status` output misleading. When the loader's v2 `plugins` registration is detected, the manifest is now rewritten with `entry` set to the package name and `configPath` to the config file that holds the matching entry — every other manifest field preserved and no config file ever touched (the legacy singular `plugin` key still never counts and only fires the read-only advisory). The CLI `install` path is unchanged and stays idempotent.
+
 ## [1.8.0] - 2026-10-11
 
 ### Changed
