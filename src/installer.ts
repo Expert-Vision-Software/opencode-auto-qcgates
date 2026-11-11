@@ -907,7 +907,8 @@ function externalSkillRecommendation(
 
 export async function detectOptionalSkills(
   configBase: string,
-  packageDir: string = getPackageDir()
+  packageDir: string = getPackageDir(),
+  extraSkillsRoots: readonly string[] = defaultExtraSkillsRoots()
 ): Promise<string[]> {
   const recs: string[] = [];
 
@@ -916,18 +917,45 @@ export async function detectOptionalSkills(
     return recs;
   }
 
+  // Consumer-side state: a declined dependency stays declined — never re-prompt.
+  const packageName = await getPackageName();
+  const consumerManifest = await InstallManifest.read(join(configBase, `${packageName}.manifest.json`));
+  const stateById = new Map(
+    consumerManifest.optionalDependencies.map(dep => [dep.id, dep.state])
+  );
+
+  // A skill counts as present when it lives in the project-local skills root
+  // or in any global skills root (OpenCode global config, agent-universal dir).
+  const skillsRoots = [join(configBase, "skills"), ...extraSkillsRoots];
+
   for (const dep of pkgManifest.manifest.optionalDependencies) {
     if (dep.kind !== "skill" || !isExternalSkill(dep)) {
       continue;
     }
-    const skillPath = join(configBase, "skills", dep.id);
-    if (await exists(skillPath)) {
+    if (stateById.get(dep.id) === "declined") {
+      continue;
+    }
+    const present = await anyExists(skillsRoots.map(root => join(root, dep.id)));
+    if (present) {
       continue;
     }
     recs.push(externalSkillRecommendation(dep));
   }
 
   return recs;
+}
+
+function defaultExtraSkillsRoots(): readonly string[] {
+  return [join(getGlobalConfigPath(), "skills"), join(homedir(), ".agents", "skills")];
+}
+
+async function anyExists(paths: readonly string[]): Promise<boolean> {
+  for (const path of paths) {
+    if (await exists(path)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export async function readLocalConfig(projectDir: string): Promise<Record<string, unknown> | null> {

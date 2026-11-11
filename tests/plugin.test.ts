@@ -907,7 +907,65 @@ describe("detectOptionalSkills", () => {
     await mkdir(join(configBase, "skills", "grilling"), { recursive: true });
     await writeFile(join(configBase, "skills", "grilling", "SKILL.md"), "---\nname: grilling\n---\n");
 
-    const recs = await detectOptionalSkills(configBase);
+    const recs = await detectOptionalSkills(configBase, undefined, []);
+    expect(recs).toEqual([]);
+  });
+
+  test("returns empty array when `grilling` is installed in a global skills root", async () => {
+    const configBase = join(fixturesRoot, "global-root");
+    await rm(configBase, { recursive: true }).catch(() => {});
+    await mkdir(configBase, { recursive: true });
+
+    const globalRoot = join(fixturesRoot, "global-skills");
+    await rm(globalRoot, { recursive: true }).catch(() => {});
+    await mkdir(join(globalRoot, "grilling"), { recursive: true });
+    await writeFile(join(globalRoot, "grilling", "SKILL.md"), "---\nname: grilling\n---\n");
+
+    const recs = await detectOptionalSkills(configBase, undefined, [globalRoot]);
+    expect(recs).toEqual([]);
+  });
+
+  test("returns empty array when `grilling` is installed at the OpenCode global config root", async () => {
+    const configBase = join(fixturesRoot, "xdg-root");
+    await rm(configBase, { recursive: true }).catch(() => {});
+    await mkdir(configBase, { recursive: true });
+
+    await mkdir(join(SANDBOX_GLOBAL_BASE, "skills", "grilling"), { recursive: true });
+    await writeFile(
+      join(SANDBOX_GLOBAL_BASE, "skills", "grilling", "SKILL.md"),
+      "---\nname: grilling\n---\n"
+    );
+    try {
+      const recs = await detectOptionalSkills(configBase, undefined, [join(SANDBOX_GLOBAL_BASE, "skills")]);
+      expect(recs).toEqual([]);
+    } finally {
+      await rm(join(SANDBOX_GLOBAL_BASE, "skills"), { recursive: true, force: true });
+    }
+  });
+
+  test("a declined `grilling` dependency is never re-recommended", async () => {
+    const configBase = join(fixturesRoot, "declined");
+    await rm(configBase, { recursive: true }).catch(() => {});
+    await mkdir(configBase, { recursive: true });
+    const manifest = {
+      version: "0.0.0-test",
+      mode: "copy",
+      entry: null,
+      configPath: null,
+      files: [],
+      optionalDependencies: [
+        {
+          id: "grilling",
+          kind: "skill",
+          description: "Interview loop",
+          state: "declined",
+          source: { type: "external-skill", repo: "mattpocock/skills", skill: "grilling" },
+        },
+      ],
+    };
+    await writeFile(join(configBase, "opencode-auto-qcgates.manifest.json"), JSON.stringify(manifest));
+
+    const recs = await detectOptionalSkills(configBase, undefined, []);
     expect(recs).toEqual([]);
   });
 
@@ -916,7 +974,7 @@ describe("detectOptionalSkills", () => {
     await rm(configBase, { recursive: true }).catch(() => {});
     await mkdir(configBase, { recursive: true });
 
-    const recs = await detectOptionalSkills(configBase);
+    const recs = await detectOptionalSkills(configBase, undefined, []);
     expect(recs.length).toBeGreaterThanOrEqual(1);
     const joined = recs.join("\n");
     expect(joined).toContain("grilling");
@@ -934,7 +992,7 @@ describe("detectOptionalSkills", () => {
     await rm(configBase, { recursive: true }).catch(() => {});
     await mkdir(configBase, { recursive: true });
 
-    const recs = await detectOptionalSkills(configBase);
+    const recs = await detectOptionalSkills(configBase, undefined, []);
     const joined = recs.join("\n");
     // mentions the no-manifest / can't-infer trigger so the user understands why
     expect(joined).toMatch(/init|interview|tier/i);
@@ -946,7 +1004,7 @@ describe("detectOptionalSkills", () => {
     await rm(configBase, { recursive: true }).catch(() => {});
     await mkdir(configBase, { recursive: true });
 
-    const recs = await detectOptionalSkills(configBase);
+    const recs = await detectOptionalSkills(configBase, undefined, []);
     const joined = recs.join("\n");
     // The recommendation should NOT pretend to auto-install or modify config
     expect(joined).not.toMatch(/opencode\.json/);
