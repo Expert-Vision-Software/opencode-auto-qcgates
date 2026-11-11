@@ -705,6 +705,57 @@ describe("failure advisory (one-shot)", () => {
   });
 });
 
+describe("load-time manifest registration back-fill", () => {
+  test("load-time ensure rewrites a null-entry manifest with the detected registration and leaves the config byte-for-byte", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      await writeGlobalPluginConfig([PACKAGE_NAME]);
+      const fixtureDir = await makeFixture("null-entry-backfill");
+      const configPath = join(SANDBOX_GLOBAL_BASE, "opencode.json");
+      const configContent = await readFile(configPath, "utf-8");
+      const manifestPath = join(SANDBOX_GLOBAL_BASE, `${PACKAGE_NAME}.manifest.json`);
+
+      await invokeLoadCycle("backfill-install", fixtureDir);
+      const seeded = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
+      await writeFile(manifestPath, JSON.stringify({ ...seeded, entry: null, configPath: null }, null, 2));
+      const before = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
+
+      await invokeLoadCycle("backfill-heal", fixtureDir);
+
+      const healed = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
+      expect(healed["entry"]).toBe(PACKAGE_NAME);
+      expect(healed["configPath"]).toBe(configPath);
+      // no other manifest fields change
+      expect(healed["version"]).toBe(before["version"]);
+      expect(healed["mode"]).toBe(before["mode"]);
+      expect(healed["files"]).toEqual(before["files"]);
+      expect(healed["optionalDependencies"]).toEqual(before["optionalDependencies"]);
+      expect(await readFile(configPath, "utf-8")).toBe(configContent);
+    });
+  });
+
+  test("the steady state after a back-fill is a zero-write no-op", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      await writeGlobalPluginConfig([PACKAGE_NAME]);
+      const fixtureDir = await makeFixture("null-entry-backfill-steady");
+      const manifestPath = join(SANDBOX_GLOBAL_BASE, `${PACKAGE_NAME}.manifest.json`);
+
+      await invokeLoadCycle("steady-backfill-1", fixtureDir);
+      const seeded = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
+      await writeFile(manifestPath, JSON.stringify({ ...seeded, entry: null, configPath: null }, null, 2));
+      await invokeLoadCycle("steady-backfill-2", fixtureDir);
+      const globalBefore = await snapshotDirectory(SANDBOX_GLOBAL_BASE);
+      const repoBefore = await snapshotDirectory(fixtureDir);
+
+      await invokeLoadCycle("steady-backfill-3", fixtureDir);
+
+      expect(await snapshotDirectory(SANDBOX_GLOBAL_BASE)).toEqual(globalBefore);
+      expect(await snapshotDirectory(fixtureDir)).toEqual(repoBefore);
+    });
+  });
+});
+
 describe("legacy singular plugin key upgrade advisory", () => {
   test("a legacy-only repo: the load cycle fires the upgrade advisory once and performs zero writes", async () => {
     await withGlobalSandbox(async () => {

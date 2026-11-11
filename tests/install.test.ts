@@ -830,6 +830,133 @@ describe("surgical plugin-array registration", () => {
   });
 });
 
+describe("load-time registration back-fill", () => {
+  async function writeRegisteredConfig(fixtureDir: string, content: string): Promise<string> {
+    const localDir = join(fixtureDir, ".opencode");
+    await mkdir(localDir, { recursive: true });
+    const configPath = join(localDir, "opencode.json");
+    await writeFile(configPath, content);
+    return configPath;
+  }
+
+  test("a load-style install back-fills a null-entry manifest from an existing plugins registration", async () => {
+    const fixtureDir = await makeFixture("backfill-null-entry");
+    const configPath = await writeRegisteredConfig(fixtureDir, `{\n  "plugins": ["${PACKAGE_NAME}"]\n}\n`);
+    const manifestPath = join(fixtureDir, ".opencode", `${PACKAGE_NAME}.manifest.json`);
+    // First install records the real payload, then simulate the 1.8.1 null-entry manifest.
+    await install("local", fixtureDir, INSTALL_OPTIONS);
+    const seeded = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
+    await writeFile(
+      manifestPath,
+      JSON.stringify({ ...seeded, entry: null, configPath: null }, null, 2)
+    );
+    const before = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
+
+    const result = await install("local", fixtureDir, INSTALL_OPTIONS);
+
+    expect(result.action).toBe("noop");
+    expect(result.entry).toBe(PACKAGE_NAME);
+    expect(result.configPath).toBe(configPath);
+    const manifest = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
+    expect(manifest["entry"]).toBe(PACKAGE_NAME);
+    expect(manifest["configPath"]).toBe(configPath);
+    // no other manifest fields change
+    expect(manifest["version"]).toBe(before["version"]);
+    expect(manifest["mode"]).toBe(before["mode"]);
+    expect(manifest["files"]).toEqual(before["files"]);
+    expect(manifest["optionalDependencies"]).toEqual(before["optionalDependencies"]);
+  });
+
+  test("a load-style install never mutates any config file while back-filling", async () => {
+    const fixtureDir = await makeFixture("backfill-jsonc");
+    const localDir = join(fixtureDir, ".opencode");
+    await mkdir(localDir, { recursive: true });
+    const jsoncPath = join(localDir, "opencode.jsonc");
+    const jsoncContent = [
+      "{",
+      "  // consumer comment",
+      '  "$schema": "https://opencode.ai/config.json",',
+      `  "plugins": ["${PACKAGE_NAME}@1.2.0"],`,
+      "}",
+      "",
+    ].join("\n");
+    await writeFile(jsoncPath, jsoncContent);
+    await writeFile(
+      join(localDir, `${PACKAGE_NAME}.manifest.json`),
+      JSON.stringify({
+        version: "1.8.1",
+        mode: "plugin",
+        entry: null,
+        configPath: null,
+        files: [{ path: "skills/demo/SKILL.md", hash: "a".repeat(64) }],
+      })
+    );
+
+    await install("local", fixtureDir, INSTALL_OPTIONS);
+
+    expect(await readFile(jsoncPath, "utf-8")).toBe(jsoncContent);
+    const manifest = JSON.parse(
+      await readFile(join(localDir, `${PACKAGE_NAME}.manifest.json`), "utf-8")
+    ) as { entry: string | null; configPath: string | null };
+    expect(manifest.entry).toBe(PACKAGE_NAME);
+    expect(manifest.configPath).toBe(jsoncPath);
+  });
+
+  test("a load-style install leaves a null-entry manifest alone when no registration exists", async () => {
+    const fixtureDir = await makeFixture("backfill-unregistered");
+    const localDir = join(fixtureDir, ".opencode");
+    await mkdir(localDir, { recursive: true });
+    const manifestPath = join(localDir, `${PACKAGE_NAME}.manifest.json`);
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        version: "1.8.1",
+        mode: "plugin",
+        entry: null,
+        configPath: null,
+        files: [{ path: "skills/demo/SKILL.md", hash: "a".repeat(64) }],
+      })
+    );
+
+    const result = await install("local", fixtureDir, INSTALL_OPTIONS);
+
+    expect(result.entry).toBeNull();
+    expect(result.configPath).toBeNull();
+    const manifest = JSON.parse(await readFile(manifestPath, "utf-8")) as {
+      entry: string | null;
+      configPath: string | null;
+    };
+    expect(manifest.entry).toBeNull();
+    expect(manifest.configPath).toBeNull();
+  });
+
+  test("once entry/configPath are back-filled, removing the registration flips status to not installed", async () => {
+    const fixtureDir = await makeFixture("backfill-status-flip");
+    const configPath = await writeRegisteredConfig(fixtureDir, `{\n  "plugins": ["${PACKAGE_NAME}"]\n}\n`);
+    const localDir = join(fixtureDir, ".opencode");
+    await mkdir(join(localDir, "skills", "demo"), { recursive: true });
+    await writeFile(join(localDir, "skills", "demo", "SKILL.md"), "payload");
+    await writeFile(
+      join(localDir, `${PACKAGE_NAME}.manifest.json`),
+      JSON.stringify({
+        version: "1.8.1",
+        mode: "plugin",
+        entry: null,
+        configPath: null,
+        files: [{ path: "skills/demo/SKILL.md", hash: await InstallManifest.hashFile(join(localDir, "skills/demo/SKILL.md")) }],
+      })
+    );
+
+    await install("local", fixtureDir, INSTALL_OPTIONS);
+    expect((await status(fixtureDir)).local?.installed).toBe(true);
+
+    await writeFile(configPath, JSON.stringify({ $schema: "https://opencode.ai/config.json" }, null, 2));
+
+    expect((await status(fixtureDir)).local).toBeNull();
+    expect(await isScopeInstalled(localDir, PACKAGE_NAME)).toBe(false);
+  });
+});
+
 describe("legacy manifest backward compatibility", () => {
   test("a manifest without mode reads back as copy with null entry and configPath", async () => {
     const fixtureDir = await makeFixture("legacy-manifest-mode");

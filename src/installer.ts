@@ -453,11 +453,14 @@ function isConfigPluginEntry(value: unknown): value is ConfigPluginEntry {
   return typeof value === "object" && value !== null;
 }
 
-export async function isPluginInConfigBase(
-  configBase: string,
-  packageName: string
-): Promise<boolean> {
+interface ConfigBaseScan {
+  registered: boolean;
+  registeredConfigPath: string | null;
+}
+
+async function scanConfigBase(configBase: string, packageName: string): Promise<ConfigBaseScan> {
   let registered = false;
+  let registeredConfigPath: string | null = null;
   for (const candidate of candidateConfigPaths(configBase)) {
     const read = await readPluginKeyEntries(candidate);
     if (read === null) {
@@ -465,12 +468,40 @@ export async function isPluginInConfigBase(
     }
     if (await pluginEntryResolver.matchesAny(read.v2Entries, packageName, dirname(candidate))) {
       registered = true;
+      registeredConfigPath ??= candidate;
     }
     if (await pluginEntryResolver.matchesAny(read.legacyEntries, packageName, dirname(candidate))) {
       legacyPluginKeyAdvisor.advise(candidate, packageName);
     }
   }
-  return registered;
+  return { registered, registeredConfigPath };
+}
+
+export async function isPluginInConfigBase(
+  configBase: string,
+  packageName: string
+): Promise<boolean> {
+  return (await scanConfigBase(configBase, packageName)).registered;
+}
+
+async function registeredPluginConfigPath(
+  configBase: string,
+  packageName: string
+): Promise<string | null> {
+  return (await scanConfigBase(configBase, packageName)).registeredConfigPath;
+}
+
+async function backfillRecordedRegistration(
+  configBase: string,
+  packageName: string,
+  entry: string | null,
+  configPath: string | null
+): Promise<{ entry: string | null; configPath: string | null }> {
+  const detectedConfigPath = await registeredPluginConfigPath(configBase, packageName);
+  if (detectedConfigPath === null) {
+    return { entry, configPath };
+  }
+  return { entry: entry ?? packageName, configPath: configPath ?? detectedConfigPath };
 }
 
 function candidateConfigPaths(configBase: string): string[] {
@@ -663,6 +694,10 @@ export async function install(
       configPath = outcome.configPath;
       pluginAdded = outcome.action === "updated" || outcome.action === "created";
     }
+  } else if (mode === "plugin" && (entry === null || configPath === null)) {
+    const backfilled = await backfillRecordedRegistration(configBase, packageName, entry, configPath);
+    entry = backfilled.entry;
+    configPath = backfilled.configPath;
   }
 
   const pkgManifest = await loadPackageManifest(pkgDir);
