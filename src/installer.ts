@@ -491,6 +491,19 @@ async function registeredPluginConfigPath(
   return (await scanConfigBase(configBase, packageName)).registeredConfigPath;
 }
 
+async function backfillRecordedRegistration(
+  configBase: string,
+  packageName: string,
+  entry: string | null,
+  configPath: string | null
+): Promise<{ entry: string | null; configPath: string | null }> {
+  const detectedConfigPath = await registeredPluginConfigPath(configBase, packageName);
+  if (detectedConfigPath === null) {
+    return { entry, configPath };
+  }
+  return { entry: entry ?? packageName, configPath: configPath ?? detectedConfigPath };
+}
+
 function candidateConfigPaths(configBase: string): string[] {
   const paths: string[] = [
     join(configBase, "opencode.json"),
@@ -682,15 +695,9 @@ export async function install(
       pluginAdded = outcome.action === "updated" || outcome.action === "created";
     }
   } else if (mode === "plugin" && (entry === null || configPath === null)) {
-    // Load-time self-ensure never writes config (addPluginConfig: false). If the loader's
-    // registration already exists, back-fill the manifest's recorded registration from it —
-    // read-only against the config file — so the recorded entry check in readScopeStatus
-    // stops being inert.
-    const detectedConfigPath = await registeredPluginConfigPath(configBase, packageName);
-    if (detectedConfigPath !== null) {
-      entry ??= packageName;
-      configPath ??= detectedConfigPath;
-    }
+    const backfilled = await backfillRecordedRegistration(configBase, packageName, entry, configPath);
+    entry = backfilled.entry;
+    configPath = backfilled.configPath;
   }
 
   const pkgManifest = await loadPackageManifest(pkgDir);
