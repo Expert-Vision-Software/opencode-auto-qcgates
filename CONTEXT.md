@@ -89,7 +89,7 @@ A bundled file under `skills/<name>/refs/` consulted by the skill body during gu
 _Avoid_: helper file, side doc, appendix
 
 **Installer Recommendation**:
-A non-blocking advisory message the installer (`src/installer.ts`) surfaces after a successful install — never modifies the consumer config autonomously. The current trigger is Aurelia detection (suggests `aurelia-expert`); future triggers append to the same `InstallResult.recommendations` channel.
+A non-blocking advisory message the installer (`src/installer.ts`) surfaces after a successful install — never modifies the consumer config autonomously. Triggers append to the same `InstallResult.recommendations` channel: Aurelia detection (suggests `aurelia-expert`) and an absent external optional skill (suggests its `npx skills add` install). The optional-skill trigger probes the project-local skills root and the global skills roots, and stays silent once the consumer manifest records the dependency as `declined`.
 _Avoid_: install hint, banner, tip
 
 ### Delivery

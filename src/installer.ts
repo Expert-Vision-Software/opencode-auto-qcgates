@@ -952,25 +952,23 @@ export async function detectOptionalSkills(
     return recs;
   }
 
-  // Consumer-side state: a declined dependency stays declined — never re-prompt.
   const packageName = await getPackageName();
   const consumerManifest = await InstallManifest.read(join(configBase, `${packageName}.manifest.json`));
-  const stateById = new Map(
-    consumerManifest.optionalDependencies.map(dep => [dep.id, dep.state])
+  const declinedDependencyIds = new Set(
+    consumerManifest.optionalDependencies
+      .filter(dep => dep.state === "declined")
+      .map(dep => dep.id)
   );
-
-  // A skill counts as present when it lives in the project-local skills root
-  // or in any global skills root (OpenCode global config, agent-universal dir).
-  const skillsRoots = [join(configBase, "skills"), ...extraSkillsRoots];
+  const optionalSkillRoots = [join(configBase, "skills"), ...extraSkillsRoots];
 
   for (const dep of pkgManifest.manifest.optionalDependencies) {
     if (dep.kind !== "skill" || !isExternalSkill(dep)) {
       continue;
     }
-    if (stateById.get(dep.id) === "declined") {
+    if (declinedDependencyIds.has(dep.id)) {
       continue;
     }
-    const present = await anyExists(skillsRoots.map(root => join(root, dep.id)));
+    const present = await anyExists(optionalSkillRoots.map(root => join(root, dep.id)));
     if (present) {
       continue;
     }
