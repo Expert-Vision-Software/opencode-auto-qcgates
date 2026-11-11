@@ -453,11 +453,14 @@ function isConfigPluginEntry(value: unknown): value is ConfigPluginEntry {
   return typeof value === "object" && value !== null;
 }
 
-export async function isPluginInConfigBase(
-  configBase: string,
-  packageName: string
-): Promise<boolean> {
+interface ConfigBaseScan {
+  registered: boolean;
+  registeredConfigPath: string | null;
+}
+
+async function scanConfigBase(configBase: string, packageName: string): Promise<ConfigBaseScan> {
   let registered = false;
+  let registeredConfigPath: string | null = null;
   for (const candidate of candidateConfigPaths(configBase)) {
     const read = await readPluginKeyEntries(candidate);
     if (read === null) {
@@ -465,12 +468,27 @@ export async function isPluginInConfigBase(
     }
     if (await pluginEntryResolver.matchesAny(read.v2Entries, packageName, dirname(candidate))) {
       registered = true;
+      registeredConfigPath ??= candidate;
     }
     if (await pluginEntryResolver.matchesAny(read.legacyEntries, packageName, dirname(candidate))) {
       legacyPluginKeyAdvisor.advise(candidate, packageName);
     }
   }
-  return registered;
+  return { registered, registeredConfigPath };
+}
+
+export async function isPluginInConfigBase(
+  configBase: string,
+  packageName: string
+): Promise<boolean> {
+  return (await scanConfigBase(configBase, packageName)).registered;
+}
+
+async function registeredPluginConfigPath(
+  configBase: string,
+  packageName: string
+): Promise<string | null> {
+  return (await scanConfigBase(configBase, packageName)).registeredConfigPath;
 }
 
 function candidateConfigPaths(configBase: string): string[] {
@@ -662,6 +680,16 @@ export async function install(
       entry = PluginNameNormalizer.canonicalize(packageName);
       configPath = outcome.configPath;
       pluginAdded = outcome.action === "updated" || outcome.action === "created";
+    }
+  } else if (mode === "plugin" && (entry === null || configPath === null)) {
+    // Load-time self-ensure never writes config (addPluginConfig: false). If the loader's
+    // registration already exists, back-fill the manifest's recorded registration from it —
+    // read-only against the config file — so the recorded entry check in readScopeStatus
+    // stops being inert.
+    const detectedConfigPath = await registeredPluginConfigPath(configBase, packageName);
+    if (detectedConfigPath !== null) {
+      entry ??= packageName;
+      configPath ??= detectedConfigPath;
     }
   }
 
