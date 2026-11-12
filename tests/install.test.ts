@@ -21,6 +21,7 @@ import { CopyModeUnsupportedError } from "../src/copy-mode-unsupported-error.ts"
 import { CacheCleaner } from "../src/cache-cleaner.ts";
 import { snapshotDirectory } from "./snapshot.ts";
 import { SANDBOX_GLOBAL_BASE, resetGlobalConfig, withGlobalSandbox, writeGlobalPluginConfig } from "./global-sandbox.ts";
+import { INSTALL_OPTIONS, installOptions } from "./install-options-fixture.ts";
 import {
   expectRegistrationBackfilled,
   readRecordedManifest,
@@ -81,7 +82,6 @@ async function captureWarnings(operation: () => Promise<void>): Promise<string[]
   return warnings;
 }
 
-const INSTALL_OPTIONS = { addPluginConfig: false, migrateRootConfig: false, force: false, declineOptional: [] } as const;
 
 describe("PluginNameNormalizer", () => {
   test("normalize strips a version suffix", () => {
@@ -126,12 +126,7 @@ describe("config writes over unparseable JSON", () => {
 
     let pluginAdded = true;
     const warnings = await captureWarnings(async () => {
-      const result = await install("local", fixtureDir, {
-        addPluginConfig: true,
-        migrateRootConfig: false,
-        force: false,
-        declineOptional: [],
-      });
+      const result = await install("local", fixtureDir, installOptions({ addPluginConfig: true }));
       pluginAdded = result.pluginAdded;
     });
 
@@ -161,12 +156,7 @@ describe("config writes over unparseable JSON", () => {
 describe("canonical plugin references", () => {
   test("install writes the plugin reference canonically as name@latest", async () => {
     const fixtureDir = await makeFixture("canonical-fresh");
-    const result = await install("local", fixtureDir, {
-      addPluginConfig: true,
-      migrateRootConfig: false,
-      force: false,
-      declineOptional: [],
-    });
+    const result = await install("local", fixtureDir, installOptions({ addPluginConfig: true }));
 
     expect(result.pluginAdded).toBe(true);
     expect(await readLocalConfigRaw(fixtureDir)).toContain('"plugins"');
@@ -181,12 +171,7 @@ describe("canonical plugin references", () => {
       plugins: [PACKAGE_NAME],
     });
 
-    const result = await install("local", fixtureDir, {
-      addPluginConfig: true,
-      migrateRootConfig: false,
-      force: false,
-      declineOptional: [],
-    });
+    const result = await install("local", fixtureDir, installOptions({ addPluginConfig: true }));
 
     expect(result.pluginAdded).toBe(false);
     expect(await readPluginArray(fixtureDir)).toEqual([PACKAGE_NAME]);
@@ -199,12 +184,7 @@ describe("canonical plugin references", () => {
       plugins: [`${PACKAGE_NAME}@1.2.0`],
     });
 
-    const result = await install("local", fixtureDir, {
-      addPluginConfig: true,
-      migrateRootConfig: false,
-      force: false,
-      declineOptional: [],
-    });
+    const result = await install("local", fixtureDir, installOptions({ addPluginConfig: true }));
 
     expect(result.pluginAdded).toBe(false);
     expect(await readPluginArray(fixtureDir)).toEqual([`${PACKAGE_NAME}@1.2.0`]);
@@ -225,7 +205,7 @@ describe("canonical plugin references", () => {
 });
 
 describe("v2 plugins key registration", () => {
-  const ADD_PLUGIN_OPTIONS = { addPluginConfig: true, migrateRootConfig: false, force: false, declineOptional: [] };
+  const ADD_PLUGIN_OPTIONS = installOptions({ addPluginConfig: true });
   const LEGACY_ADVISORY_MARKER = "legacy and inert under OpenCode v2";
 
   async function writeRawLocalConfig(fixtureDir: string, content: string): Promise<string> {
@@ -394,12 +374,7 @@ describe("install manifest", () => {
     expect(driftResult.skipped).toEqual(["skills/test-baselining/SKILL.md"]);
     expect(await readFile(skillFile, "utf-8")).toBe("# consumer modified this file");
 
-    const forcedResult = await install("local", fixtureDir, {
-      addPluginConfig: false,
-      migrateRootConfig: false,
-      force: true,
-      declineOptional: [],
-    });
+    const forcedResult = await install("local", fixtureDir, installOptions({ force: true }));
     expect(forcedResult.action).toBe("upgraded");
     expect(forcedResult.skipped).toEqual([]);
     const restored = await readFile(skillFile, "utf-8");
@@ -454,12 +429,10 @@ describe("root config migration guard", () => {
       JSON.stringify({ $schema: "https://opencode.ai/config.json", model: "some/model" }, null, 2)
     );
 
-    const result = await install("local", fixtureDir, {
+    const result = await install("local", fixtureDir, installOptions({
       addPluginConfig: true,
       migrateRootConfig: true,
-      force: false,
-      declineOptional: [],
-    });
+    }));
 
     expect(result.migrated).toBe(true);
     expect(await exists(join(fixtureDir, "opencode.json"))).toBe(false);
@@ -618,12 +591,7 @@ describe("content declaration and mode resolution", () => {
 
   test("install persists mode, entry, and configPath in the manifest and reports them", async () => {
     const fixtureDir = await makeFixture("mode-manifest");
-    const result = await install("local", fixtureDir, {
-      addPluginConfig: true,
-      migrateRootConfig: false,
-      force: false,
-      declineOptional: [],
-    });
+    const result = await install("local", fixtureDir, installOptions({ addPluginConfig: true }));
 
     expect(result.mode).toBe("plugin");
     expect(result.entry).toBe(CANONICAL_PLUGIN_REF);
@@ -650,12 +618,7 @@ describe("content declaration and mode resolution", () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       const fixtureDir = await makeFixture("status-mode");
-      await install("local", fixtureDir, {
-        addPluginConfig: true,
-        migrateRootConfig: false,
-        force: false,
-        declineOptional: [],
-      });
+      await install("local", fixtureDir, installOptions({ addPluginConfig: true }));
 
       const result = await status(fixtureDir);
 
@@ -735,12 +698,7 @@ describe("surgical plugin-array registration", () => {
     await writeFile(jsonPath, jsonContent);
     await writeFile(jsoncPath, jsoncContent);
 
-    const result = await install("local", fixtureDir, {
-      addPluginConfig: true,
-      migrateRootConfig: false,
-      force: false,
-      declineOptional: [],
-    });
+    const result = await install("local", fixtureDir, installOptions({ addPluginConfig: true }));
 
     expect(result.pluginAdded).toBe(false);
     expect(await readFile(jsonPath, "utf-8")).toBe(jsonContent);
@@ -754,12 +712,7 @@ describe("surgical plugin-array registration", () => {
       JSON.stringify({ $schema: "https://opencode.ai/config.json", model: "some/model" }, null, 2) + "\n";
     await writeFile(rootPath, rootContent);
 
-    const result = await install("local", fixtureDir, {
-      addPluginConfig: true,
-      migrateRootConfig: false,
-      force: false,
-      declineOptional: [],
-    });
+    const result = await install("local", fixtureDir, installOptions({ addPluginConfig: true }));
 
     expect(result.pluginAdded).toBe(true);
     expect(result.configPath).toBe(join(fixtureDir, ".opencode", "opencode.json"));
@@ -783,12 +736,7 @@ describe("surgical plugin-array registration", () => {
     ].join("\n");
     await writeFile(join(localDir, "opencode.jsonc"), content);
 
-    await install("local", fixtureDir, {
-      addPluginConfig: true,
-      migrateRootConfig: false,
-      force: false,
-      declineOptional: [],
-    });
+    await install("local", fixtureDir, installOptions({ addPluginConfig: true }));
 
     const after = await readFile(join(localDir, "opencode.jsonc"), "utf-8");
     expect(after).toContain("// keep this comment");
@@ -804,20 +752,10 @@ describe("surgical plugin-array registration", () => {
     const content = `{\n  "plugins": ["${PACKAGE_NAME}@1.2.0"]\n}\n`;
     await writeFile(join(localDir, "opencode.json"), content);
 
-    await install("local", fixtureDir, {
-      addPluginConfig: true,
-      migrateRootConfig: false,
-      force: false,
-      declineOptional: [],
-    });
+    await install("local", fixtureDir, installOptions({ addPluginConfig: true }));
     const before = await snapshotDirectory(fixtureDir);
 
-    const result = await install("local", fixtureDir, {
-      addPluginConfig: true,
-      migrateRootConfig: false,
-      force: false,
-      declineOptional: [],
-    });
+    const result = await install("local", fixtureDir, installOptions({ addPluginConfig: true }));
 
     expect(result.pluginAdded).toBe(false);
     expect(await readFile(join(localDir, "opencode.json"), "utf-8")).toBe(content);
@@ -825,12 +763,7 @@ describe("surgical plugin-array registration", () => {
   });
   test("a removed registration makes status report not installed and a later install re-adds it", async () => {
     const fixtureDir = await makeFixture("entry-removed");
-    await install("local", fixtureDir, {
-      addPluginConfig: true,
-      migrateRootConfig: false,
-      force: false,
-      declineOptional: [],
-    });
+    await install("local", fixtureDir, installOptions({ addPluginConfig: true }));
     const configPath = join(fixtureDir, ".opencode", "opencode.json");
     await writeFile(
       configPath,
@@ -839,12 +772,7 @@ describe("surgical plugin-array registration", () => {
 
     expect((await status(fixtureDir)).local).toBeNull();
 
-    const result = await install("local", fixtureDir, {
-      addPluginConfig: true,
-      migrateRootConfig: false,
-      force: false,
-      declineOptional: [],
-    });
+    const result = await install("local", fixtureDir, installOptions({ addPluginConfig: true }));
 
     expect(result.pluginAdded).toBe(true);
     expect((await status(fixtureDir)).local?.installed).toBe(true);
@@ -904,7 +832,7 @@ describe("load-time registration back-fill", () => {
     expect(manifest.configPath).toBe(jsoncPath);
   });
 
-  test("a blocked CLI ensure back-fills the canonical ref from a registration covering the scope", async () => {
+  test("a blocked CLI ensure leaves the registration null when only a global registration exists", async () => {
     await withGlobalSandbox(async () => {
       await resetGlobalConfig();
       await writeGlobalPluginConfig([PACKAGE_NAME]);
@@ -923,24 +851,23 @@ describe("load-time registration back-fill", () => {
 
       const captured: { result: Awaited<ReturnType<typeof install>> | null } = { result: null };
       const warnings = await captureWarnings(async () => {
-        captured.result = await install("local", fixtureDir, {
-          addPluginConfig: true,
-          migrateRootConfig: false,
-          force: false,
-          declineOptional: [],
-        });
+        captured.result = await install("local", fixtureDir, installOptions({ addPluginConfig: true }));
       });
 
       expect(captured.result?.pluginAdded).toBe(false);
       expect(warnings.join("\n")).toContain("could not be parsed");
       expect(await readFile(localPath, "utf-8")).toBe(invalidContent);
-      expect(captured.result?.entry).toBe(CANONICAL_PLUGIN_REF);
-      expect(captured.result?.configPath).toBe(globalConfigPath);
+      expect(captured.result?.entry).toBeNull();
+      expect(captured.result?.configPath).toBeNull();
       const manifest = JSON.parse(
         await readFile(join(localDir, `${PACKAGE_NAME}.manifest.json`), "utf-8")
       ) as { entry: string | null; configPath: string | null };
-      expect(manifest.entry).toBe(CANONICAL_PLUGIN_REF);
-      expect(manifest.configPath).toBe(globalConfigPath);
+      expect(manifest.entry).toBeNull();
+      expect(manifest.configPath).toBeNull();
+      const localStatus = (await status(fixtureDir)).local;
+      expect(localStatus?.installed).toBe(true);
+      expect(localStatus?.entry).toBeNull();
+      expect(localStatus?.configPath).not.toBe(globalConfigPath);
     });
   });
 
@@ -959,12 +886,7 @@ describe("load-time registration back-fill", () => {
       expect(backfilled.entry).toBe(CANONICAL_PLUGIN_REF);
 
       const configBefore = await readFile(configPath, "utf-8");
-      const cli = await install("local", fixtureDir, {
-        addPluginConfig: true,
-        migrateRootConfig: false,
-        force: false,
-        declineOptional: [],
-      });
+      const cli = await install("local", fixtureDir, installOptions({ addPluginConfig: true }));
 
       expect(cli.entry).toBe(CANONICAL_PLUGIN_REF);
       expect(await readFile(configPath, "utf-8")).toBe(configBefore);
@@ -1004,11 +926,12 @@ describe("load-time registration back-fill", () => {
     const localDir = join(fixtureDir, ".opencode");
     await mkdir(join(localDir, "skills", "demo"), { recursive: true });
     await writeFile(join(localDir, "skills", "demo", "SKILL.md"), "payload");
+    const demoHash = await InstallManifest.hashFile(join(localDir, "skills", "demo", "SKILL.md"));
+    if (demoHash === null) {
+      throw new Error("test setup: failed to hash skills/demo/SKILL.md");
+    }
     await writePreRegistrationManifest(join(localDir, `${PACKAGE_NAME}.manifest.json`), [
-      {
-        path: "skills/demo/SKILL.md",
-        hash: (await InstallManifest.hashFile(join(localDir, "skills/demo/SKILL.md"))) ?? "",
-      },
+      { path: "skills/demo/SKILL.md", hash: demoHash },
     ]);
 
     await install("local", fixtureDir, INSTALL_OPTIONS);
@@ -1176,7 +1099,7 @@ describe("PluginEntryResolver", () => {
 });
 
 describe("path-form plugin entries (B2)", () => {
-  const ADD_PLUGIN_OPTIONS = { addPluginConfig: true, migrateRootConfig: false, force: false, declineOptional: [] };
+  const ADD_PLUGIN_OPTIONS = installOptions({ addPluginConfig: true });
 
   async function makeScratchPackage(name: string, pkgName: string): Promise<string> {
     const scratchDir = join(TEST_DIR, name);

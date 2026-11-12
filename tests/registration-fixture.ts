@@ -2,7 +2,7 @@ import { expect } from "bun:test";
 import { readFile, writeFile } from "node:fs/promises";
 import type { ManifestFileEntry } from "../src/manifest.ts";
 
-export const PRE_REGISTRATION_MANIFEST_VERSION = "1.8.1";
+export const PRE_REGISTRATION_MANIFEST_VERSION = "0.0.0-pre-registration";
 
 export type ManifestRecord = Record<string, unknown>;
 

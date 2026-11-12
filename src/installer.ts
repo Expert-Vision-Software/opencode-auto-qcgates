@@ -9,6 +9,7 @@ import {
   loadPackageManifest,
   mergeOptionalDependencies,
   PACKAGE_MANIFEST_RELPATH,
+  uniqueOptionalDependencyIds,
   unknownOptionalDependencyIds,
   type ExternalSkillSource,
   type PackageOptionalDep,
@@ -488,28 +489,15 @@ export async function isPluginInConfigBase(
   return (await scanConfigBase(configBase, packageName)).registered;
 }
 
-async function firstRegisteredConfigPath(
-  configBases: string[],
-  packageName: string
-): Promise<string | null> {
-  for (const configBase of configBases) {
-    const detectedConfigPath = (await scanConfigBase(configBase, packageName)).registeredConfigPath;
-    if (detectedConfigPath !== null) {
-      return detectedConfigPath;
-    }
-  }
-  return null;
-}
-
 async function backfillRecordedRegistration(
-  configBases: string[],
+  configBase: string,
   packageName: string,
   registration: RecordedRegistration
 ): Promise<RecordedRegistration> {
   if (registration.entry !== null && registration.configPath !== null) {
     return registration;
   }
-  const detectedConfigPath = await firstRegisteredConfigPath(configBases, packageName);
+  const detectedConfigPath = (await scanConfigBase(configBase, packageName)).registeredConfigPath;
   if (detectedConfigPath === null) {
     return registration;
   }
@@ -517,17 +505,6 @@ async function backfillRecordedRegistration(
     entry: registration.entry ?? PluginNameNormalizer.canonicalize(packageName),
     configPath: registration.configPath ?? detectedConfigPath,
   };
-}
-
-function backfillConfigBases(
-  scope: Scope,
-  configBase: string,
-  includeGlobalFallback: boolean
-): string[] {
-  if (includeGlobalFallback && scope === "local") {
-    return [configBase, getGlobalConfigPath()];
-  }
-  return [configBase];
 }
 
 function candidateConfigPaths(configBase: string): string[] {
@@ -629,22 +606,6 @@ export async function migrateRootConfig(
   return true;
 }
 
-function optionalDependencyCatalog(
-  declared: readonly PackageOptionalDep[],
-  recorded: readonly { id: string }[]
-): { id: string }[] {
-  const catalog: { id: string }[] = [];
-  const seen = new Set<string>();
-  for (const entry of [...declared, ...recorded]) {
-    if (seen.has(entry.id)) {
-      continue;
-    }
-    seen.add(entry.id);
-    catalog.push(entry);
-  }
-  return catalog;
-}
-
 export async function install(
   scope: Scope,
   projectDir: string = process.cwd(),
@@ -674,21 +635,26 @@ export async function install(
 
   const pkgManifest = await loadPackageManifest(pkgDir);
   let declaredDeps: PackageOptionalDep[] = [];
+  let effectiveDeclines = declineOptional;
   if (!pkgManifest.ok) {
     console.warn(
       `[${packageName}] Ignoring invalid ${PACKAGE_MANIFEST_RELPATH}: ${pkgManifest.errors.join("; ")}`
     );
+    if (declineOptional.length > 0) {
+      console.warn(
+        `[${packageName}] Ignoring --decline-optional ${declineOptional.join(", ")}: the package ` +
+          `manifest is invalid, so optional dependency ids cannot be validated.`
+      );
+      effectiveDeclines = [];
+    }
   } else {
     declaredDeps = pkgManifest.manifest.optionalDependencies;
   }
 
-  const knownDeps = optionalDependencyCatalog(declaredDeps, manifest.optionalDependencies);
-  const unknownDeclines = unknownOptionalDependencyIds(declineOptional, knownDeps);
+  const knownDepIds = uniqueOptionalDependencyIds(declaredDeps, manifest.optionalDependencies);
+  const unknownDeclines = unknownOptionalDependencyIds(effectiveDeclines, knownDepIds);
   if (unknownDeclines.length > 0) {
-    throw new UnknownOptionalDependencyError(
-      unknownDeclines,
-      knownDeps.map(dep => dep.id)
-    );
+    throw new UnknownOptionalDependencyError(unknownDeclines, knownDepIds);
   }
 
   let migrated = false;
@@ -744,16 +710,13 @@ export async function install(
 
   let registration: RecordedRegistration = manifest.registration;
   let pluginAdded = false;
-  let pluginEnsureBlocked = false;
 
   if (addPluginConfig && mode === "plugin") {
     const outcome = await pluginConfigEditor.ensurePluginEntry(packageName, { scope, projectDir });
     if (outcome.warning !== null) {
       console.warn(`[${packageName}] ${outcome.warning}`);
     }
-    if (outcome.action === "blocked") {
-      pluginEnsureBlocked = true;
-    } else {
+    if (outcome.action !== "blocked") {
       registration = {
         entry: PluginNameNormalizer.canonicalize(packageName),
         configPath: outcome.configPath,
@@ -763,18 +726,13 @@ export async function install(
   }
 
   if (mode === "plugin") {
-    registration = await backfillRecordedRegistration(
-      backfillConfigBases(scope, configBase, pluginEnsureBlocked),
-      packageName,
-      registration
-    );
+    registration = await backfillRecordedRegistration(configBase, packageName, registration);
   }
 
   const depMerge = mergeOptionalDependencies(manifest.optionalDependencies, declaredDeps);
-  const dependencies = declineOptionalDependencies(depMerge.dependencies, declineOptional);
-  const dependenciesChanged =
-    depMerge.changed ||
-    dependencies.some((dep, index) => dep.state !== depMerge.dependencies[index].state);
+  const declined = declineOptionalDependencies(depMerge.dependencies, effectiveDeclines);
+  const dependencies = declined.dependencies;
+  const dependenciesChanged = depMerge.changed || declined.changed;
 
   const registrationRecorded =
     manifest.mode === mode &&
@@ -1048,7 +1006,7 @@ function defaultExtraSkillsRoots(): readonly string[] {
   return [join(getGlobalConfigPath(), "skills"), join(homedir(), ".agents", "skills")];
 }
 
-export function optionalSkillProbeRoots(
+function optionalSkillProbeRoots(
   configBase: string,
   extraSkillsRoots: readonly string[]
 ): string[] {

@@ -1,8 +1,9 @@
-import { describe, test, expect, beforeAll, afterAll } from "bun:test";
+import { describe, test, expect, beforeAll, afterAll, spyOn } from "bun:test";
 import { join } from "node:path";
-import { exists, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, exists, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { install, detectOptionalSkills } from "../src/installer.ts";
 import type { InstallOptionalDep } from "../src/optional-deps.ts";
+import { installOptions } from "./install-options-fixture.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".test-decline-optional");
 const REPO_ROOT = join(import.meta.dirname, "..");
@@ -11,7 +12,7 @@ const SANDBOX = join(TEST_DIR, "sandbox");
 
 process.env.XDG_CACHE_HOME = join(TEST_DIR, ".cache");
 
-const BASE_OPTIONS = { addPluginConfig: false, migrateRootConfig: false, force: false, declineOptional: [] } as const;
+const BASE_OPTIONS = installOptions();
 
 beforeAll(async () => {
   await rm(TEST_DIR, { recursive: true, force: true });
@@ -152,6 +153,39 @@ describe("install declineOptional", () => {
     await expect(
       install("local", fixtureDir, { ...BASE_OPTIONS, declineOptional: ["nope"] })
     ).rejects.toThrow(/grilling/);
+  });
+
+  test("an invalid package manifest warns and ignores --decline-optional instead of failing", async () => {
+    const fixtureDir = await makeFixture("invalid-package-manifest");
+    const packageDir = join(TEST_DIR, "invalid-package");
+    await rm(packageDir, { recursive: true, force: true });
+    await mkdir(packageDir, { recursive: true });
+    await cp(join(REPO_ROOT, "skills"), join(packageDir, "skills"), { recursive: true });
+    await cp(join(REPO_ROOT, "commands"), join(packageDir, "commands"), { recursive: true });
+    await writeFile(join(packageDir, "manifest.json"), "{ this is not json");
+
+    const warnings: string[] = [];
+    const warn = spyOn(console, "warn").mockImplementation((message: unknown) => {
+      warnings.push(String(message));
+    });
+    let result: Awaited<ReturnType<typeof install>>;
+    try {
+      result = await install(
+        "local",
+        fixtureDir,
+        { ...BASE_OPTIONS, declineOptional: ["grilling"] },
+        null,
+        false,
+        packageDir
+      );
+    } finally {
+      warn.mockRestore();
+    }
+
+    expect(result.action).toBe("installed");
+    expect(warnings.join("\n")).toContain("--decline-optional");
+    expect(warnings.join("\n")).toContain("invalid");
+    expect(await readDeps(fixtureDir)).toEqual([]);
   });
 
   test("detectOptionalSkills omits a declined dependency from recommendations", async () => {
