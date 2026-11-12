@@ -28,6 +28,7 @@ Options:
   -m, --mode <mode>      Install mode: "plugin" or "copy"
   -f, --force            Skip confirmation prompts
       --migrate          Consent to move a repo-root opencode.json into .opencode/
+      --decline-optional <id>  Record an optional dependency as declined (repeatable)
   -h, --help             Show this help message
   -v, --version          Show version
 
@@ -36,6 +37,7 @@ Examples:
   ${PACKAGE_NAME} install --scope global
   ${PACKAGE_NAME} install --mode plugin
   ${PACKAGE_NAME} install --scope local --migrate
+  ${PACKAGE_NAME} install --decline-optional grilling
   ${PACKAGE_NAME} uninstall --scope local
   ${PACKAGE_NAME} status
   ${PACKAGE_NAME} clear-cache
@@ -93,6 +95,10 @@ async function main(): Promise<void> {
         type: "boolean",
         default: false,
       },
+      "decline-optional": {
+        type: "string",
+        multiple: true,
+      },
       package: {
         type: "string",
       },
@@ -129,6 +135,7 @@ async function main(): Promise<void> {
   const scope: Scope | undefined = values.scope as Scope | undefined;
   const force: boolean = values.force;
   const migrate: boolean = values.migrate;
+  const declineOptional: string[] = values["decline-optional"] ?? [];
 
   if (scope && scope !== "local" && scope !== "global") {
     console.error(`Invalid scope: ${scope}. Must be "local" or "global".`);
@@ -140,7 +147,7 @@ async function main(): Promise<void> {
   try {
     switch (command) {
       case "install":
-        await installCommand({ scope: scope ?? null, force, mode, migrate });
+        await installCommand({ scope: scope ?? null, force, mode, migrate, declineOptional });
         break;
       case "uninstall":
         await uninstallCommand({ scope, force });

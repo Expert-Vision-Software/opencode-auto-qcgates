@@ -559,7 +559,7 @@ const REPRO_SCENARIOS: ReproScenario[] = [
         join(localDir, "opencode.json"),
         JSON.stringify({ $schema: "https://opencode.ai/config.json", plugins: ["opencode-auto-qcgates"] }, null, 2)
       );
-      await install("local", dir, { addPluginConfig: false, migrateRootConfig: false, force: false });
+      await install("local", dir, { addPluginConfig: false, migrateRootConfig: false, force: false, declineOptional: [] });
     },
   },
 ];
@@ -654,7 +654,7 @@ describe("install advisory (one-shot)", () => {
         join(localDir, "opencode.json"),
         JSON.stringify({ $schema: "https://opencode.ai/config.json", plugins: ["opencode-architect"] }, null, 2)
       );
-      await install("local", fixtureDir, { addPluginConfig: false, migrateRootConfig: false, force: false });
+      await install("local", fixtureDir, { addPluginConfig: false, migrateRootConfig: false, force: false, declineOptional: [] });
 
       const { warnings, restore } = captureConsoleWarnings();
       const before = await snapshotDirectory(fixtureDir);

@@ -325,7 +325,7 @@ describe("RegistrationDetector.scopesToEnsure", () => {
 });
 
 describe("RegistrationDetector.hasAnyInstallation", () => {
-  const INSTALL_OPTIONS = { addPluginConfig: false, migrateRootConfig: false, force: false } as const;
+  const INSTALL_OPTIONS = { addPluginConfig: false, migrateRootConfig: false, force: false, declineOptional: [] } as const;
 
   test("returns false when nothing is installed in any scope", async () => {
     await withGlobalSandbox(async () => {
