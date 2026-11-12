@@ -126,6 +126,8 @@ Install scope (`--scope local` is default; both forms below):
 
 Add `--mode plugin|copy` to pick the install mode explicitly. This package declares `"content": "code"`, so it always installs in `plugin` mode (registers the plugin in `opencode.json`); `--mode copy` is rejected. Assets-only packages default to `copy` and use `--mode plugin` to opt into registration.
 
+Record an intentional omission of an optional dependency with `--decline-optional <id>` (repeatable), e.g. `bunx opencode-auto-qcgates install --decline-optional grilling`. The consumer manifest stores `state: "declined"` for that id, so the installer stops recommending it; every other dependency and state is preserved. An unknown id fails the install before anything is written.
+
 Check / remove:
 
 ```bash

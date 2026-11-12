@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`install --decline-optional <id>` records an intentional omission** — the CLI can now write `state: "declined"` for a named optional dependency (repeatable flag), so opting out of `grilling` no longer requires hand-editing `.opencode/opencode-auto-qcgates.manifest.json`. The ids are validated before any asset copy or manifest write: an unknown id fails with an error naming the ids that can be declined and leaves the target directory byte-for-byte unchanged. Every other dependency field and state is preserved, and `detectOptionalSkills` already suppresses declined entries. The load-time self-ensure passes no ids and behaves exactly as before. (fixes #21)
+
 ### Fixed
 - **Optional-skill detection probes global skills roots** — `detectOptionalSkills` (src/installer.ts) now checks the OpenCode global config skills root (`$XDG_CONFIG_HOME/opencode/skills`, falling back to `~/.config/opencode/skills`) and the agent-universal skills directory (`~/.agents/skills`) in addition to the project-local `<configBase>/skills/`. A `grilling` installed globally — via `npx skills add mattpocock/skills --skill grilling -a universal` or into OpenCode's global root — no longer triggers a spurious "Optional skill not detected" recommendation on every install (fixes #19, also reported with an intentional-omission repro in the issue comments).
 - **`declined` optional dependencies are never re-recommended** — the consumer-side `<name>.manifest.json` `optionalDependencies` state is now consulted: an entry whose `state` is `declined` suppresses the recommendation permanently, so an intentional omission resolves once instead of re-prompting every session. (`accepted` entries that are genuinely missing still recommend, since acceptance without the skill present means the install did not land.)

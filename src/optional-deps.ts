@@ -204,6 +204,30 @@ export interface OptionalDepMergeResult {
   changed: boolean;
 }
 
+export function unknownOptionalDependencyIds(
+  requested: readonly string[],
+  known: readonly { id: string }[]
+): string[] {
+  const knownIds = new Set(known.map(entry => entry.id));
+  const unknown: string[] = [];
+  for (const id of requested) {
+    if (!knownIds.has(id) && !unknown.includes(id)) {
+      unknown.push(id);
+    }
+  }
+  return unknown;
+}
+
+export function declineOptionalDependencies(
+  dependencies: readonly InstallOptionalDep[],
+  declinedIds: readonly string[]
+): InstallOptionalDep[] {
+  const requested = new Set(declinedIds);
+  return dependencies.map(entry =>
+    requested.has(entry.id) ? { ...entry, state: "declined" as const } : entry
+  );
+}
+
 export function mergeOptionalDependencies(
   existing: InstallOptionalDep[] | undefined,
   declared: PackageOptionalDep[]

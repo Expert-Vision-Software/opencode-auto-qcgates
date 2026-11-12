@@ -75,7 +75,7 @@ async function captureWarnings(operation: () => Promise<void>): Promise<string[]
   return warnings;
 }
 
-const INSTALL_OPTIONS = { addPluginConfig: false, migrateRootConfig: false, force: false } as const;
+const INSTALL_OPTIONS = { addPluginConfig: false, migrateRootConfig: false, force: false, declineOptional: [] } as const;
 
 describe("PluginNameNormalizer", () => {
   test("normalize strips a version suffix", () => {
@@ -124,6 +124,7 @@ describe("config writes over unparseable JSON", () => {
         addPluginConfig: true,
         migrateRootConfig: false,
         force: false,
+        declineOptional: [],
       });
       pluginAdded = result.pluginAdded;
     });
@@ -158,6 +159,7 @@ describe("canonical plugin references", () => {
       addPluginConfig: true,
       migrateRootConfig: false,
       force: false,
+      declineOptional: [],
     });
 
     expect(result.pluginAdded).toBe(true);
@@ -177,6 +179,7 @@ describe("canonical plugin references", () => {
       addPluginConfig: true,
       migrateRootConfig: false,
       force: false,
+      declineOptional: [],
     });
 
     expect(result.pluginAdded).toBe(false);
@@ -194,6 +197,7 @@ describe("canonical plugin references", () => {
       addPluginConfig: true,
       migrateRootConfig: false,
       force: false,
+      declineOptional: [],
     });
 
     expect(result.pluginAdded).toBe(false);
@@ -215,7 +219,7 @@ describe("canonical plugin references", () => {
 });
 
 describe("v2 plugins key registration", () => {
-  const ADD_PLUGIN_OPTIONS = { addPluginConfig: true, migrateRootConfig: false, force: false };
+  const ADD_PLUGIN_OPTIONS = { addPluginConfig: true, migrateRootConfig: false, force: false, declineOptional: [] };
   const LEGACY_ADVISORY_MARKER = "legacy and inert under OpenCode v2";
 
   async function writeRawLocalConfig(fixtureDir: string, content: string): Promise<string> {
@@ -388,6 +392,7 @@ describe("install manifest", () => {
       addPluginConfig: false,
       migrateRootConfig: false,
       force: true,
+      declineOptional: [],
     });
     expect(forcedResult.action).toBe("upgraded");
     expect(forcedResult.skipped).toEqual([]);
@@ -447,6 +452,7 @@ describe("root config migration guard", () => {
       addPluginConfig: true,
       migrateRootConfig: true,
       force: false,
+      declineOptional: [],
     });
 
     expect(result.migrated).toBe(true);
@@ -610,6 +616,7 @@ describe("content declaration and mode resolution", () => {
       addPluginConfig: true,
       migrateRootConfig: false,
       force: false,
+      declineOptional: [],
     });
 
     expect(result.mode).toBe("plugin");
@@ -641,6 +648,7 @@ describe("content declaration and mode resolution", () => {
         addPluginConfig: true,
         migrateRootConfig: false,
         force: false,
+        declineOptional: [],
       });
 
       const result = await status(fixtureDir);
@@ -725,6 +733,7 @@ describe("surgical plugin-array registration", () => {
       addPluginConfig: true,
       migrateRootConfig: false,
       force: false,
+      declineOptional: [],
     });
 
     expect(result.pluginAdded).toBe(false);
@@ -743,6 +752,7 @@ describe("surgical plugin-array registration", () => {
       addPluginConfig: true,
       migrateRootConfig: false,
       force: false,
+      declineOptional: [],
     });
 
     expect(result.pluginAdded).toBe(true);
@@ -771,6 +781,7 @@ describe("surgical plugin-array registration", () => {
       addPluginConfig: true,
       migrateRootConfig: false,
       force: false,
+      declineOptional: [],
     });
 
     const after = await readFile(join(localDir, "opencode.jsonc"), "utf-8");
@@ -791,6 +802,7 @@ describe("surgical plugin-array registration", () => {
       addPluginConfig: true,
       migrateRootConfig: false,
       force: false,
+      declineOptional: [],
     });
     const before = await snapshotDirectory(fixtureDir);
 
@@ -798,6 +810,7 @@ describe("surgical plugin-array registration", () => {
       addPluginConfig: true,
       migrateRootConfig: false,
       force: false,
+      declineOptional: [],
     });
 
     expect(result.pluginAdded).toBe(false);
@@ -810,6 +823,7 @@ describe("surgical plugin-array registration", () => {
       addPluginConfig: true,
       migrateRootConfig: false,
       force: false,
+      declineOptional: [],
     });
     const configPath = join(fixtureDir, ".opencode", "opencode.json");
     await writeFile(
@@ -823,6 +837,7 @@ describe("surgical plugin-array registration", () => {
       addPluginConfig: true,
       migrateRootConfig: false,
       force: false,
+      declineOptional: [],
     });
 
     expect(result.pluginAdded).toBe(true);
@@ -925,6 +940,7 @@ describe("load-time registration back-fill", () => {
           addPluginConfig: true,
           migrateRootConfig: false,
           force: false,
+          declineOptional: [],
         });
       });
 
@@ -961,6 +977,7 @@ describe("load-time registration back-fill", () => {
         addPluginConfig: true,
         migrateRootConfig: false,
         force: false,
+        declineOptional: [],
       });
 
       expect(cli.entry).toBe(CANONICAL_PLUGIN_REF);
@@ -1184,7 +1201,7 @@ describe("PluginEntryResolver", () => {
 });
 
 describe("path-form plugin entries (B2)", () => {
-  const ADD_PLUGIN_OPTIONS = { addPluginConfig: true, migrateRootConfig: false, force: false };
+  const ADD_PLUGIN_OPTIONS = { addPluginConfig: true, migrateRootConfig: false, force: false, declineOptional: [] };
 
   async function makeScratchPackage(name: string, pkgName: string): Promise<string> {
     const scratchDir = join(TEST_DIR, name);
