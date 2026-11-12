@@ -21,6 +21,7 @@ interface PluginDefinition {
 const TEST_DIR = join(import.meta.dirname, ".test-temp");
 process.env.XDG_CACHE_HOME = join(import.meta.dirname, ".test-xdg-cache");
 const PACKAGE_NAME = "opencode-auto-qcgates";
+const CANONICAL_PLUGIN_REF = `${PACKAGE_NAME}@latest`;
 
 beforeAll(async () => {
   await rm(TEST_DIR, { recursive: true }).catch(() => {});
@@ -723,7 +724,7 @@ describe("load-time manifest registration back-fill", () => {
       await invokeLoadCycle("backfill-heal", fixtureDir);
 
       const healed = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
-      expect(healed["entry"]).toBe(PACKAGE_NAME);
+      expect(healed["entry"]).toBe(CANONICAL_PLUGIN_REF);
       expect(healed["configPath"]).toBe(configPath);
       // no other manifest fields change
       expect(healed["version"]).toBe(before["version"]);

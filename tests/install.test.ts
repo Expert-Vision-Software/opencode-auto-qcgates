@@ -20,7 +20,7 @@ import { BundledAssetsMissingError } from "../src/bundled-assets-missing-error.t
 import { CopyModeUnsupportedError } from "../src/copy-mode-unsupported-error.ts";
 import { CacheCleaner } from "../src/cache-cleaner.ts";
 import { snapshotDirectory } from "./snapshot.ts";
-import { SANDBOX_GLOBAL_BASE, resetGlobalConfig, withGlobalSandbox } from "./global-sandbox.ts";
+import { SANDBOX_GLOBAL_BASE, resetGlobalConfig, withGlobalSandbox, writeGlobalPluginConfig } from "./global-sandbox.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".test-install");
 const SANDBOX_CACHE = join(import.meta.dirname, ".test-cache");
@@ -855,10 +855,10 @@ describe("load-time registration back-fill", () => {
     const result = await install("local", fixtureDir, INSTALL_OPTIONS);
 
     expect(result.action).toBe("noop");
-    expect(result.entry).toBe(PACKAGE_NAME);
+    expect(result.entry).toBe(CANONICAL_PLUGIN_REF);
     expect(result.configPath).toBe(configPath);
     const manifest = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
-    expect(manifest["entry"]).toBe(PACKAGE_NAME);
+    expect(manifest["entry"]).toBe(CANONICAL_PLUGIN_REF);
     expect(manifest["configPath"]).toBe(configPath);
     // no other manifest fields change
     expect(manifest["version"]).toBe(before["version"]);
@@ -898,8 +898,80 @@ describe("load-time registration back-fill", () => {
     const manifest = JSON.parse(
       await readFile(join(localDir, `${PACKAGE_NAME}.manifest.json`), "utf-8")
     ) as { entry: string | null; configPath: string | null };
-    expect(manifest.entry).toBe(PACKAGE_NAME);
+    expect(manifest.entry).toBe(CANONICAL_PLUGIN_REF);
     expect(manifest.configPath).toBe(jsoncPath);
+  });
+
+  test("a blocked CLI ensure back-fills the canonical ref from a registration covering the scope", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      await writeGlobalPluginConfig([PACKAGE_NAME]);
+      const fixtureDir = await makeFixture("backfill-blocked-ensure");
+      const localDir = join(fixtureDir, ".opencode");
+      await mkdir(localDir, { recursive: true });
+      const localPath = join(localDir, "opencode.json");
+      const invalidContent = [
+        "{",
+        `  "plugins": ["${PACKAGE_NAME}"],`,
+        "}",
+        "",
+      ].join("\n");
+      await writeFile(localPath, invalidContent);
+      const globalConfigPath = join(SANDBOX_GLOBAL_BASE, "opencode.json");
+
+      const captured: { result: Awaited<ReturnType<typeof install>> | null } = { result: null };
+      const warnings = await captureWarnings(async () => {
+        captured.result = await install("local", fixtureDir, {
+          addPluginConfig: true,
+          migrateRootConfig: false,
+          force: false,
+        });
+      });
+
+      expect(captured.result?.pluginAdded).toBe(false);
+      expect(warnings.join("\n")).toContain("could not be parsed");
+      expect(await readFile(localPath, "utf-8")).toBe(invalidContent);
+      expect(captured.result?.entry).toBe(CANONICAL_PLUGIN_REF);
+      expect(captured.result?.configPath).toBe(globalConfigPath);
+      const manifest = JSON.parse(
+        await readFile(join(localDir, `${PACKAGE_NAME}.manifest.json`), "utf-8")
+      ) as { entry: string | null; configPath: string | null };
+      expect(manifest.entry).toBe(CANONICAL_PLUGIN_REF);
+      expect(manifest.configPath).toBe(globalConfigPath);
+    });
+  });
+
+  test("a load-style back-fill followed by a CLI install keeps entry stable", async () => {
+    await withGlobalSandbox(async () => {
+      await resetGlobalConfig();
+      const fixtureDir = await makeFixture("backfill-then-cli");
+      const configPath = await writeRegisteredConfig(fixtureDir, `{\n  "plugins": ["${PACKAGE_NAME}"]\n}\n`);
+      const localDir = join(fixtureDir, ".opencode");
+      const manifestPath = join(localDir, `${PACKAGE_NAME}.manifest.json`);
+
+      await install("local", fixtureDir, INSTALL_OPTIONS);
+      const seeded = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
+      await writeFile(manifestPath, JSON.stringify({ ...seeded, entry: null, configPath: null }, null, 2));
+
+      const backfilled = await install("local", fixtureDir, INSTALL_OPTIONS);
+      expect(backfilled.entry).toBe(CANONICAL_PLUGIN_REF);
+
+      const configBefore = await readFile(configPath, "utf-8");
+      const cli = await install("local", fixtureDir, {
+        addPluginConfig: true,
+        migrateRootConfig: false,
+        force: false,
+      });
+
+      expect(cli.entry).toBe(CANONICAL_PLUGIN_REF);
+      expect(await readFile(configPath, "utf-8")).toBe(configBefore);
+      const manifest = JSON.parse(await readFile(manifestPath, "utf-8")) as {
+        entry: string | null;
+        configPath: string | null;
+      };
+      expect(manifest.entry).toBe(CANONICAL_PLUGIN_REF);
+      expect(manifest.configPath).toBe(configPath);
+    });
   });
 
   test("a load-style install leaves a null-entry manifest alone when no registration exists", async () => {
