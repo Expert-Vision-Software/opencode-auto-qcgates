@@ -495,17 +495,44 @@ async function registeredPluginConfigPath(
   return (await scanConfigBase(configBase, packageName)).registeredConfigPath;
 }
 
+async function firstRegisteredConfigPath(
+  configBases: string[],
+  packageName: string
+): Promise<string | null> {
+  for (const configBase of configBases) {
+    const detectedConfigPath = await registeredPluginConfigPath(configBase, packageName);
+    if (detectedConfigPath !== null) {
+      return detectedConfigPath;
+    }
+  }
+  return null;
+}
+
 async function backfillRecordedRegistration(
-  configBase: string,
+  configBases: string[],
   packageName: string,
   entry: string | null,
   configPath: string | null
 ): Promise<{ entry: string | null; configPath: string | null }> {
-  const detectedConfigPath = await registeredPluginConfigPath(configBase, packageName);
+  const detectedConfigPath = await firstRegisteredConfigPath(configBases, packageName);
   if (detectedConfigPath === null) {
     return { entry, configPath };
   }
-  return { entry: entry ?? packageName, configPath: configPath ?? detectedConfigPath };
+  return {
+    entry: entry ?? PluginNameNormalizer.canonicalize(packageName),
+    configPath: configPath ?? detectedConfigPath,
+  };
+}
+
+function backfillConfigBases(
+  scope: Scope,
+  configBase: string,
+  includeGlobalFallback: boolean
+): string[] {
+  if (includeGlobalFallback && scope === "local") {
+    return [configBase, getGlobalConfigPath()];
+  }
+  return [configBase];
 }
 
 function candidateConfigPaths(configBase: string): string[] {
@@ -723,19 +750,29 @@ export async function install(
   let entry = manifest.entry;
   let configPath = manifest.configPath;
   let pluginAdded = false;
+  let pluginEnsureBlocked = false;
 
   if (addPluginConfig && mode === "plugin") {
     const outcome = await pluginConfigEditor.ensurePluginEntry(packageName, { scope, projectDir });
     if (outcome.warning !== null) {
       console.warn(`[${packageName}] ${outcome.warning}`);
     }
-    if (outcome.action !== "blocked") {
+    if (outcome.action === "blocked") {
+      pluginEnsureBlocked = true;
+    } else {
       entry = PluginNameNormalizer.canonicalize(packageName);
       configPath = outcome.configPath;
       pluginAdded = outcome.action === "updated" || outcome.action === "created";
     }
-  } else if (mode === "plugin" && (entry === null || configPath === null)) {
-    const backfilled = await backfillRecordedRegistration(configBase, packageName, entry, configPath);
+  }
+
+  if (mode === "plugin" && (entry === null || configPath === null)) {
+    const backfilled = await backfillRecordedRegistration(
+      backfillConfigBases(scope, configBase, pluginEnsureBlocked),
+      packageName,
+      entry,
+      configPath
+    );
     entry = backfilled.entry;
     configPath = backfilled.configPath;
   }
