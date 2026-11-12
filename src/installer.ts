@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { dirname, join, basename } from "node:path";
 import { PluginNameNormalizer } from "./plugin-name.ts";
 import { PluginEntryResolver, type ConfigPluginEntry } from "./plugin-entry.ts";
-import { InstallManifest, type InstallMode, type ManifestFileEntry } from "./manifest.ts";
+import { InstallManifest, type InstallMode, type ManifestFileEntry, type RecordedRegistration } from "./manifest.ts";
 import {
   declineOptionalDependencies,
   loadPackageManifest,
@@ -488,19 +488,12 @@ export async function isPluginInConfigBase(
   return (await scanConfigBase(configBase, packageName)).registered;
 }
 
-async function registeredPluginConfigPath(
-  configBase: string,
-  packageName: string
-): Promise<string | null> {
-  return (await scanConfigBase(configBase, packageName)).registeredConfigPath;
-}
-
 async function firstRegisteredConfigPath(
   configBases: string[],
   packageName: string
 ): Promise<string | null> {
   for (const configBase of configBases) {
-    const detectedConfigPath = await registeredPluginConfigPath(configBase, packageName);
+    const detectedConfigPath = (await scanConfigBase(configBase, packageName)).registeredConfigPath;
     if (detectedConfigPath !== null) {
       return detectedConfigPath;
     }
@@ -511,16 +504,18 @@ async function firstRegisteredConfigPath(
 async function backfillRecordedRegistration(
   configBases: string[],
   packageName: string,
-  entry: string | null,
-  configPath: string | null
-): Promise<{ entry: string | null; configPath: string | null }> {
+  registration: RecordedRegistration
+): Promise<RecordedRegistration> {
+  if (registration.entry !== null && registration.configPath !== null) {
+    return registration;
+  }
   const detectedConfigPath = await firstRegisteredConfigPath(configBases, packageName);
   if (detectedConfigPath === null) {
-    return { entry, configPath };
+    return registration;
   }
   return {
-    entry: entry ?? PluginNameNormalizer.canonicalize(packageName),
-    configPath: configPath ?? detectedConfigPath,
+    entry: registration.entry ?? PluginNameNormalizer.canonicalize(packageName),
+    configPath: registration.configPath ?? detectedConfigPath,
   };
 }
 
@@ -747,8 +742,7 @@ export async function install(
   const action: InstallAction =
     writtenRelativePaths.length === 0 ? "noop" : manifest.hasContents() ? "upgraded" : "installed";
 
-  let entry = manifest.entry;
-  let configPath = manifest.configPath;
+  let registration: RecordedRegistration = manifest.registration;
   let pluginAdded = false;
   let pluginEnsureBlocked = false;
 
@@ -760,21 +754,20 @@ export async function install(
     if (outcome.action === "blocked") {
       pluginEnsureBlocked = true;
     } else {
-      entry = PluginNameNormalizer.canonicalize(packageName);
-      configPath = outcome.configPath;
+      registration = {
+        entry: PluginNameNormalizer.canonicalize(packageName),
+        configPath: outcome.configPath,
+      };
       pluginAdded = outcome.action === "updated" || outcome.action === "created";
     }
   }
 
-  if (mode === "plugin" && (entry === null || configPath === null)) {
-    const backfilled = await backfillRecordedRegistration(
+  if (mode === "plugin") {
+    registration = await backfillRecordedRegistration(
       backfillConfigBases(scope, configBase, pluginEnsureBlocked),
       packageName,
-      entry,
-      configPath
+      registration
     );
-    entry = backfilled.entry;
-    configPath = backfilled.configPath;
   }
 
   const depMerge = mergeOptionalDependencies(manifest.optionalDependencies, declaredDeps);
@@ -784,7 +777,9 @@ export async function install(
     dependencies.some((dep, index) => dep.state !== depMerge.dependencies[index].state);
 
   const registrationRecorded =
-    manifest.mode === mode && manifest.entry === entry && manifest.configPath === configPath;
+    manifest.mode === mode &&
+    manifest.entry === registration.entry &&
+    manifest.configPath === registration.configPath;
   const shouldWriteManifest =
     recordedFiles.length > 0 &&
     (writtenRelativePaths.length > 0 ||
@@ -804,8 +799,7 @@ export async function install(
       filesToRecord,
       dependencies,
       mode,
-      entry,
-      configPath
+      registration
     );
   }
 
@@ -823,9 +817,9 @@ export async function install(
     mode,
     skillPaths: writtenSkillDirs(configBase, writtenRelativePaths),
     commandPaths: writtenCommandFiles(configBase, writtenRelativePaths),
-    configPath,
+    configPath: registration.configPath,
     manifestPath,
-    entry,
+    entry: registration.entry,
     skipped,
     migrated,
     pluginAdded,
