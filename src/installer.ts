@@ -5,9 +5,11 @@ import { PluginNameNormalizer } from "./plugin-name.ts";
 import { PluginEntryResolver, type ConfigPluginEntry } from "./plugin-entry.ts";
 import { InstallManifest, type InstallMode, type ManifestFileEntry } from "./manifest.ts";
 import {
+  declineOptionalDependencies,
   loadPackageManifest,
   mergeOptionalDependencies,
   PACKAGE_MANIFEST_RELPATH,
+  unknownOptionalDependencyIds,
   type ExternalSkillSource,
   type PackageOptionalDep,
 } from "./optional-deps.ts";
@@ -16,6 +18,7 @@ import { legacyPluginKeyAdvisor } from "./legacy-config-advisory.ts";
 import { CacheCleaner, type CacheOutcome } from "./cache-cleaner.ts";
 import { BundledAssetsMissingError } from "./bundled-assets-missing-error.ts";
 import { CopyModeUnsupportedError } from "./copy-mode-unsupported-error.ts";
+import { UnknownOptionalDependencyError } from "./unknown-optional-dependency-error.ts";
 
 export type Scope = "local" | "global";
 export type { InstallMode } from "./manifest.ts";
@@ -24,6 +27,7 @@ export interface InstallOptions {
   addPluginConfig: boolean;
   migrateRootConfig: boolean;
   force: boolean;
+  declineOptional: readonly string[];
 }
 
 export type RootConfigConflictHandler = (
@@ -603,6 +607,22 @@ export async function migrateRootConfig(
   return true;
 }
 
+function optionalDependencyCatalog(
+  declared: readonly PackageOptionalDep[],
+  recorded: readonly { id: string }[]
+): { id: string }[] {
+  const catalog: { id: string }[] = [];
+  const seen = new Set<string>();
+  for (const entry of [...declared, ...recorded]) {
+    if (seen.has(entry.id)) {
+      continue;
+    }
+    seen.add(entry.id);
+    catalog.push(entry);
+  }
+  return catalog;
+}
+
 export async function install(
   scope: Scope,
   projectDir: string = process.cwd(),
@@ -622,10 +642,32 @@ export async function install(
   const mode = await resolveMode(requestedMode);
   const pkgDir = await resolvePackageDir(packageName, packageVersion, cacheRoot, packageDir);
 
-  const { addPluginConfig, migrateRootConfig: allowRootMigration, force } = options;
+  const { addPluginConfig, migrateRootConfig: allowRootMigration, force, declineOptional } = options;
 
   const configBase = scope === "global" ? getGlobalConfigPath() : getLocalConfigPath(projectDir);
   const manifestPath = join(configBase, `${packageName}.manifest.json`);
+
+  const manifest = await InstallManifest.read(manifestPath);
+  const sameVersion = manifest.matchesVersion(packageVersion);
+
+  const pkgManifest = await loadPackageManifest(pkgDir);
+  let declaredDeps: PackageOptionalDep[] = [];
+  if (!pkgManifest.ok) {
+    console.warn(
+      `[${packageName}] Ignoring invalid ${PACKAGE_MANIFEST_RELPATH}: ${pkgManifest.errors.join("; ")}`
+    );
+  } else {
+    declaredDeps = pkgManifest.manifest.optionalDependencies;
+  }
+
+  const knownDeps = optionalDependencyCatalog(declaredDeps, manifest.optionalDependencies);
+  const unknownDeclines = unknownOptionalDependencyIds(declineOptional, knownDeps);
+  if (unknownDeclines.length > 0) {
+    throw new UnknownOptionalDependencyError(
+      unknownDeclines,
+      knownDeps.map(dep => dep.id)
+    );
+  }
 
   let migrated = false;
 
@@ -633,8 +675,6 @@ export async function install(
     migrated = await migrateRootConfig(projectDir, { enabled: true });
   }
 
-  const manifest = await InstallManifest.read(manifestPath);
-  const sameVersion = manifest.matchesVersion(packageVersion);
   const plannedFiles = await collectAssetFiles(pkgDir);
 
   if (plannedFiles.length === 0) {
@@ -700,23 +740,18 @@ export async function install(
     configPath = backfilled.configPath;
   }
 
-  const pkgManifest = await loadPackageManifest(pkgDir);
-  let declaredDeps: PackageOptionalDep[] = [];
-  if (!pkgManifest.ok) {
-    console.warn(
-      `[${packageName}] Ignoring invalid ${PACKAGE_MANIFEST_RELPATH}: ${pkgManifest.errors.join("; ")}`
-    );
-  } else {
-    declaredDeps = pkgManifest.manifest.optionalDependencies;
-  }
   const depMerge = mergeOptionalDependencies(manifest.optionalDependencies, declaredDeps);
+  const dependencies = declineOptionalDependencies(depMerge.dependencies, declineOptional);
+  const dependenciesChanged =
+    depMerge.changed ||
+    dependencies.some((dep, index) => dep.state !== depMerge.dependencies[index].state);
 
   const registrationRecorded =
     manifest.mode === mode && manifest.entry === entry && manifest.configPath === configPath;
   const shouldWriteManifest =
     recordedFiles.length > 0 &&
     (writtenRelativePaths.length > 0 ||
-      depMerge.changed ||
+      dependenciesChanged ||
       pluginAdded ||
       !manifest.hasContents() ||
       !registrationRecorded);
@@ -730,7 +765,7 @@ export async function install(
       manifestPath,
       packageVersion,
       filesToRecord,
-      depMerge.dependencies,
+      dependencies,
       mode,
       entry,
       configPath

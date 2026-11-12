@@ -11,7 +11,12 @@ import { CacheCleaner } from "./cache-cleaner.ts";
 
 const PLUGIN_SERVICE_NAME = "opencode-auto-qcgates";
 const INSTALL_ADVISORY_MESSAGE = `${PLUGIN_SERVICE_NAME} is not installed in any scope. Run "bunx opencode-auto-qcgates install --scope global" to enable the quality-gate skills and commands.`;
-const LOAD_INSTALL_OPTIONS = { addPluginConfig: false, migrateRootConfig: false, force: false };
+const LOAD_INSTALL_OPTIONS = {
+  addPluginConfig: false,
+  migrateRootConfig: false,
+  force: false,
+  declineOptional: [],
+};
 const LOAD_PRUNE_CACHE = false;
 const FALLBACK_CACHE_DIR = "~/.cache/opencode/npm/opencode-auto-qcgates@<version>";
 const TASK_AGENT_ID = "task";

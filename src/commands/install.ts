@@ -14,6 +14,7 @@ interface InstallCommandOptions {
   force: boolean;
   mode: InstallMode | null;
   migrate: boolean;
+  declineOptional: string[];
 }
 
 export async function installCommand(options: InstallCommandOptions): Promise<void> {
@@ -61,6 +62,7 @@ export async function installCommand(options: InstallCommandOptions): Promise<vo
     addPluginConfig: true,
     migrateRootConfig: options.migrate,
     force: options.force,
+    declineOptional: options.declineOptional,
   };
 
   const result = await install(scope, projectDir, installOptions, options.mode);

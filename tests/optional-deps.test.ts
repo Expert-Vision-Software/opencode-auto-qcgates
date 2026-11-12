@@ -369,7 +369,7 @@ describe("loadPackageManifest", () => {
 describe("install optionalDependencies integration", () => {
   const TEST_DIR = join(import.meta.dirname, ".test-install-optdeps");
   const PACKAGE_NAME = "opencode-auto-qcgates";
-  const INSTALL_OPTIONS = { addPluginConfig: false, migrateRootConfig: false, force: false } as const;
+  const INSTALL_OPTIONS = { addPluginConfig: false, migrateRootConfig: false, force: false, declineOptional: [] } as const;
 
   beforeAll(async () => {
     await rm(TEST_DIR, { recursive: true, force: true });
@@ -540,7 +540,7 @@ describe("InstallManifest.read optionalDependencies handling", () => {
 
 describe("install survives a corrupted dep section without clobbering user files", () => {
   const TEST_DIR = join(import.meta.dirname, ".test-corrupt-optdeps");
-  const INSTALL_OPTIONS = { addPluginConfig: false, migrateRootConfig: false, force: false } as const;
+  const INSTALL_OPTIONS = { addPluginConfig: false, migrateRootConfig: false, force: false, declineOptional: [] } as const;
 
   beforeAll(async () => {
     await rm(TEST_DIR, { recursive: true, force: true });
