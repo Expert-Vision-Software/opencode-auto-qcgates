@@ -10,11 +10,14 @@ export interface ManifestFileEntry {
   hash: string;
 }
 
-export interface ManifestContents {
-  version: string;
-  mode: InstallMode;
+export interface RecordedRegistration {
   entry: string | null;
   configPath: string | null;
+}
+
+export interface ManifestContents extends RecordedRegistration {
+  version: string;
+  mode: InstallMode;
   files: ManifestFileEntry[];
   optionalDependencies: InstallOptionalDep[] | null;
 }
@@ -43,14 +46,12 @@ export class InstallManifest {
     files: ManifestFileEntry[],
     optionalDependencies: InstallOptionalDep[] | null,
     mode: InstallMode,
-    entry: string | null,
-    configPath: string | null
+    registration: RecordedRegistration
   ): Promise<void> {
     const contents: ManifestContents = {
       version,
       mode,
-      entry,
-      configPath,
+      ...registration,
       files,
       optionalDependencies,
     };
@@ -79,6 +80,10 @@ export class InstallManifest {
 
   get configPath(): string | null {
     return this.contents?.configPath ?? null;
+  }
+
+  get registration(): RecordedRegistration {
+    return { entry: this.entry, configPath: this.configPath };
   }
 
   get files(): ManifestFileEntry[] {

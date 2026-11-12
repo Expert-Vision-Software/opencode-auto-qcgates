@@ -21,6 +21,12 @@ import { CopyModeUnsupportedError } from "../src/copy-mode-unsupported-error.ts"
 import { CacheCleaner } from "../src/cache-cleaner.ts";
 import { snapshotDirectory } from "./snapshot.ts";
 import { SANDBOX_GLOBAL_BASE, resetGlobalConfig, withGlobalSandbox, writeGlobalPluginConfig } from "./global-sandbox.ts";
+import {
+  expectRegistrationBackfilled,
+  readRecordedManifest,
+  seedNullRegistration,
+  writePreRegistrationManifest,
+} from "./registration-fixture.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".test-install");
 const SANDBOX_CACHE = join(import.meta.dirname, ".test-cache");
@@ -858,28 +864,16 @@ describe("load-time registration back-fill", () => {
     const fixtureDir = await makeFixture("backfill-null-entry");
     const configPath = await writeRegisteredConfig(fixtureDir, `{\n  "plugins": ["${PACKAGE_NAME}"]\n}\n`);
     const manifestPath = join(fixtureDir, ".opencode", `${PACKAGE_NAME}.manifest.json`);
-    // First install records the real payload, then simulate the 1.8.1 null-entry manifest.
     await install("local", fixtureDir, INSTALL_OPTIONS);
-    const seeded = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
-    await writeFile(
-      manifestPath,
-      JSON.stringify({ ...seeded, entry: null, configPath: null }, null, 2)
-    );
-    const before = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
+    const before = await seedNullRegistration(manifestPath);
 
     const result = await install("local", fixtureDir, INSTALL_OPTIONS);
 
     expect(result.action).toBe("noop");
     expect(result.entry).toBe(CANONICAL_PLUGIN_REF);
     expect(result.configPath).toBe(configPath);
-    const manifest = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
-    expect(manifest["entry"]).toBe(CANONICAL_PLUGIN_REF);
-    expect(manifest["configPath"]).toBe(configPath);
-    // no other manifest fields change
-    expect(manifest["version"]).toBe(before["version"]);
-    expect(manifest["mode"]).toBe(before["mode"]);
-    expect(manifest["files"]).toEqual(before["files"]);
-    expect(manifest["optionalDependencies"]).toEqual(before["optionalDependencies"]);
+    const manifest = await readRecordedManifest(manifestPath);
+    expectRegistrationBackfilled(manifest, before, { entry: CANONICAL_PLUGIN_REF, configPath });
   });
 
   test("a load-style install never mutates any config file while back-filling", async () => {
@@ -896,16 +890,9 @@ describe("load-time registration back-fill", () => {
       "",
     ].join("\n");
     await writeFile(jsoncPath, jsoncContent);
-    await writeFile(
-      join(localDir, `${PACKAGE_NAME}.manifest.json`),
-      JSON.stringify({
-        version: "1.8.1",
-        mode: "plugin",
-        entry: null,
-        configPath: null,
-        files: [{ path: "skills/demo/SKILL.md", hash: "a".repeat(64) }],
-      })
-    );
+    await writePreRegistrationManifest(join(localDir, `${PACKAGE_NAME}.manifest.json`), [
+      { path: "skills/demo/SKILL.md", hash: "a".repeat(64) },
+    ]);
 
     await install("local", fixtureDir, INSTALL_OPTIONS);
 
@@ -966,8 +953,7 @@ describe("load-time registration back-fill", () => {
       const manifestPath = join(localDir, `${PACKAGE_NAME}.manifest.json`);
 
       await install("local", fixtureDir, INSTALL_OPTIONS);
-      const seeded = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
-      await writeFile(manifestPath, JSON.stringify({ ...seeded, entry: null, configPath: null }, null, 2));
+      await seedNullRegistration(manifestPath);
 
       const backfilled = await install("local", fixtureDir, INSTALL_OPTIONS);
       expect(backfilled.entry).toBe(CANONICAL_PLUGIN_REF);
@@ -996,16 +982,9 @@ describe("load-time registration back-fill", () => {
     const localDir = join(fixtureDir, ".opencode");
     await mkdir(localDir, { recursive: true });
     const manifestPath = join(localDir, `${PACKAGE_NAME}.manifest.json`);
-    await writeFile(
-      manifestPath,
-      JSON.stringify({
-        version: "1.8.1",
-        mode: "plugin",
-        entry: null,
-        configPath: null,
-        files: [{ path: "skills/demo/SKILL.md", hash: "a".repeat(64) }],
-      })
-    );
+    await writePreRegistrationManifest(manifestPath, [
+      { path: "skills/demo/SKILL.md", hash: "a".repeat(64) },
+    ]);
 
     const result = await install("local", fixtureDir, INSTALL_OPTIONS);
 
@@ -1025,16 +1004,12 @@ describe("load-time registration back-fill", () => {
     const localDir = join(fixtureDir, ".opencode");
     await mkdir(join(localDir, "skills", "demo"), { recursive: true });
     await writeFile(join(localDir, "skills", "demo", "SKILL.md"), "payload");
-    await writeFile(
-      join(localDir, `${PACKAGE_NAME}.manifest.json`),
-      JSON.stringify({
-        version: "1.8.1",
-        mode: "plugin",
-        entry: null,
-        configPath: null,
-        files: [{ path: "skills/demo/SKILL.md", hash: await InstallManifest.hashFile(join(localDir, "skills/demo/SKILL.md")) }],
-      })
-    );
+    await writePreRegistrationManifest(join(localDir, `${PACKAGE_NAME}.manifest.json`), [
+      {
+        path: "skills/demo/SKILL.md",
+        hash: (await InstallManifest.hashFile(join(localDir, "skills/demo/SKILL.md"))) ?? "",
+      },
+    ]);
 
     await install("local", fixtureDir, INSTALL_OPTIONS);
     expect((await status(fixtureDir)).local?.installed).toBe(true);
