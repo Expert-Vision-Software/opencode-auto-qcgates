@@ -4,7 +4,7 @@ import { exists, mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import { Effect, type Scope } from "effect";
 import plugin from "../src/plugin.ts";
 import type { Plugin } from "@opencode/plugin/effect";
-import { detectAurelia, detectOptionalSkills, install, optionalSkillProbeRoots } from "../src/installer.ts";
+import { detectAurelia, detectOptionalSkills, install } from "../src/installer.ts";
 import { snapshotDirectory } from "./snapshot.ts";
 import {
   SANDBOX_GLOBAL_BASE,
@@ -12,6 +12,7 @@ import {
   withGlobalSandbox,
   writeGlobalPluginConfig,
 } from "./global-sandbox.ts";
+import { installOptions } from "./install-options-fixture.ts";
 import {
   expectRegistrationBackfilled,
   readRecordedManifest,
@@ -565,7 +566,7 @@ const REPRO_SCENARIOS: ReproScenario[] = [
         join(localDir, "opencode.json"),
         JSON.stringify({ $schema: "https://opencode.ai/config.json", plugins: ["opencode-auto-qcgates"] }, null, 2)
       );
-      await install("local", dir, { addPluginConfig: false, migrateRootConfig: false, force: false, declineOptional: [] });
+      await install("local", dir, installOptions());
     },
   },
 ];
@@ -660,7 +661,7 @@ describe("install advisory (one-shot)", () => {
         join(localDir, "opencode.json"),
         JSON.stringify({ $schema: "https://opencode.ai/config.json", plugins: ["opencode-architect"] }, null, 2)
       );
-      await install("local", fixtureDir, { addPluginConfig: false, migrateRootConfig: false, force: false, declineOptional: [] });
+      await install("local", fixtureDir, installOptions());
 
       const { warnings, restore } = captureConsoleWarnings();
       const before = await snapshotDirectory(fixtureDir);
@@ -937,17 +938,6 @@ describe("detectAurelia", () => {
   });
 });
 
-describe("optionalSkillProbeRoots", () => {
-  test("probes the config base's skills root once when it is also an extra root", () => {
-    const configBase = join("/home", "user", ".config", "opencode");
-    const agentSkills = join("/home", "user", ".agents", "skills");
-
-    const roots = optionalSkillProbeRoots(configBase, [join(configBase, "skills"), agentSkills]);
-
-    expect(roots).toEqual([join(configBase, "skills"), agentSkills]);
-  });
-});
-
 describe("detectOptionalSkills", () => {
   const fixturesRoot = join(import.meta.dirname, ".test-optional-skills");
 
@@ -967,6 +957,33 @@ describe("detectOptionalSkills", () => {
     await writeFile(join(configBase, "skills", "grilling", "SKILL.md"), "---\nname: grilling\n---\n");
 
     const recs = await detectOptionalSkills(configBase, undefined, []);
+    expect(recs).toEqual([]);
+  });
+
+  test("recommends once when the config base's skills root also appears as an extra root", async () => {
+    const configBase = join(fixturesRoot, "overlapping-roots");
+    await rm(configBase, { recursive: true }).catch(() => {});
+    await mkdir(configBase, { recursive: true });
+
+    const overlappingRoots = [join(configBase, "skills"), join(configBase, "skills")];
+
+    const missing = await detectOptionalSkills(configBase, undefined, overlappingRoots);
+    expect(missing).toHaveLength(1);
+    expect(missing[0]).toContain("grilling");
+
+    await mkdir(join(configBase, "skills", "grilling"), { recursive: true });
+    await writeFile(join(configBase, "skills", "grilling", "SKILL.md"), "---\nname: grilling\n---\n");
+
+    expect(await detectOptionalSkills(configBase, undefined, overlappingRoots)).toEqual([]);
+  });
+
+  test("returns empty array when the config base is itself the global skills root", async () => {
+    const configBase = join(fixturesRoot, "config-base-is-global");
+    await rm(configBase, { recursive: true }).catch(() => {});
+    await mkdir(join(configBase, "skills", "grilling"), { recursive: true });
+    await writeFile(join(configBase, "skills", "grilling", "SKILL.md"), "---\nname: grilling\n---\n");
+
+    const recs = await detectOptionalSkills(configBase, undefined, [join(configBase, "skills")]);
     expect(recs).toEqual([]);
   });
 

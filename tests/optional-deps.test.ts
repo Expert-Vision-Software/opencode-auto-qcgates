@@ -3,10 +3,13 @@ import { join } from "node:path";
 import { mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import { install } from "../src/installer.ts";
 import { InstallManifest } from "../src/manifest.ts";
+import { INSTALL_OPTIONS } from "./install-options-fixture.ts";
 import {
   validatePackageManifest,
   mergeOptionalDependencies,
   loadPackageManifest,
+  declineOptionalDependencies,
+  uniqueOptionalDependencyIds,
   type PackageManifest,
   type PackageOptionalDep,
   type InstallOptionalDep,
@@ -303,6 +306,62 @@ describe("mergeOptionalDependencies", () => {
   });
 });
 
+describe("declineOptionalDependencies", () => {
+  const GRILLING: PackageOptionalDep = {
+    id: "grilling",
+    kind: "skill",
+    description: "Interview loop for `/test-baseline init`.",
+    source: { type: "external-skill", repo: "mattpocock/skills", skill: "grilling" },
+  };
+
+  function withState(state: InstallOptionalDep["state"]): InstallOptionalDep {
+    return { ...GRILLING, state };
+  }
+
+  test("reports a real state transition as changed", () => {
+    const result = declineOptionalDependencies([withState("pending")], ["grilling"]);
+    expect(result.dependencies[0].state).toBe("declined");
+    expect(result.changed).toBe(true);
+  });
+
+  test("reports an already-declined dependency as unchanged", () => {
+    const result = declineOptionalDependencies([withState("declined")], ["grilling"]);
+    expect(result.dependencies[0].state).toBe("declined");
+    expect(result.changed).toBe(false);
+  });
+
+  test("reports an absent id as unchanged", () => {
+    const result = declineOptionalDependencies([withState("accepted")], ["not-declared"]);
+    expect(result.dependencies[0].state).toBe("accepted");
+    expect(result.changed).toBe(false);
+  });
+});
+
+describe("uniqueOptionalDependencyIds", () => {
+  const GRILLING: PackageOptionalDep = {
+    id: "grilling",
+    kind: "skill",
+    description: "Interview loop for `/test-baseline init`.",
+    source: { type: "external-skill", repo: "mattpocock/skills", skill: "grilling" },
+  };
+
+  test("unions declared and recorded ids in declared-first order without duplicates", () => {
+    const retired: InstallOptionalDep = {
+      id: "retired-dep",
+      kind: "skill",
+      description: "No longer declared.",
+      source: { type: "bundled", path: "skills/retired-dep" },
+      state: "accepted",
+    };
+    const recordedGrilling: InstallOptionalDep = { ...GRILLING, state: "declined" };
+
+    expect(uniqueOptionalDependencyIds([GRILLING], [recordedGrilling, retired])).toEqual([
+      "grilling",
+      "retired-dep",
+    ]);
+  });
+});
+
 describe("loadPackageManifest", () => {
   const PACKAGE_DIR = join(import.meta.dirname, "..");
   const FIXTURES = join(import.meta.dirname, ".test-optional-deps");
@@ -369,7 +428,6 @@ describe("loadPackageManifest", () => {
 describe("install optionalDependencies integration", () => {
   const TEST_DIR = join(import.meta.dirname, ".test-install-optdeps");
   const PACKAGE_NAME = "opencode-auto-qcgates";
-  const INSTALL_OPTIONS = { addPluginConfig: false, migrateRootConfig: false, force: false, declineOptional: [] } as const;
 
   beforeAll(async () => {
     await rm(TEST_DIR, { recursive: true, force: true });
@@ -540,7 +598,6 @@ describe("InstallManifest.read optionalDependencies handling", () => {
 
 describe("install survives a corrupted dep section without clobbering user files", () => {
   const TEST_DIR = join(import.meta.dirname, ".test-corrupt-optdeps");
-  const INSTALL_OPTIONS = { addPluginConfig: false, migrateRootConfig: false, force: false, declineOptional: [] } as const;
 
   beforeAll(async () => {
     await rm(TEST_DIR, { recursive: true, force: true });

@@ -204,14 +204,30 @@ export interface OptionalDepMergeResult {
   changed: boolean;
 }
 
+export function uniqueOptionalDependencyIds(
+  declared: readonly PackageOptionalDep[],
+  recorded: readonly InstallOptionalDep[]
+): readonly string[] {
+  const known = new Set<string>();
+  const ids: string[] = [];
+  for (const entry of [...declared, ...recorded]) {
+    if (known.has(entry.id)) {
+      continue;
+    }
+    known.add(entry.id);
+    ids.push(entry.id);
+  }
+  return ids;
+}
+
 export function unknownOptionalDependencyIds(
   requested: readonly string[],
-  known: readonly { id: string }[]
+  knownIds: readonly string[]
 ): string[] {
-  const knownIds = new Set(known.map(entry => entry.id));
+  const known = new Set(knownIds);
   const unknown: string[] = [];
   for (const id of requested) {
-    if (!knownIds.has(id) && !unknown.includes(id)) {
+    if (!known.has(id) && !unknown.includes(id)) {
       unknown.push(id);
     }
   }
@@ -221,11 +237,15 @@ export function unknownOptionalDependencyIds(
 export function declineOptionalDependencies(
   dependencies: readonly InstallOptionalDep[],
   declinedIds: readonly string[]
-): InstallOptionalDep[] {
+): OptionalDepMergeResult {
   const requested = new Set(declinedIds);
-  return dependencies.map(entry =>
-    requested.has(entry.id) ? { ...entry, state: "declined" as const } : entry
-  );
+  const changed = dependencies.some(entry => requested.has(entry.id) && entry.state !== "declined");
+  return {
+    dependencies: dependencies.map(entry =>
+      requested.has(entry.id) ? { ...entry, state: "declined" as const } : entry
+    ),
+    changed,
+  };
 }
 
 export function mergeOptionalDependencies(
