@@ -1031,7 +1031,7 @@ export async function detectOptionalSkills(
       .filter(dep => dep.state === "declined")
       .map(dep => dep.id)
   );
-  const optionalSkillRoots = [join(configBase, "skills"), ...extraSkillsRoots];
+  const optionalSkillRoots = optionalSkillProbeRoots(configBase, extraSkillsRoots);
 
   for (const dep of pkgManifest.manifest.optionalDependencies) {
     if (dep.kind !== "skill" || !isExternalSkill(dep)) {
@@ -1052,6 +1052,13 @@ export async function detectOptionalSkills(
 
 function defaultExtraSkillsRoots(): readonly string[] {
   return [join(getGlobalConfigPath(), "skills"), join(homedir(), ".agents", "skills")];
+}
+
+export function optionalSkillProbeRoots(
+  configBase: string,
+  extraSkillsRoots: readonly string[]
+): string[] {
+  return [...new Set([join(configBase, "skills"), ...extraSkillsRoots])];
 }
 
 async function anyExists(paths: readonly string[]): Promise<boolean> {

@@ -4,7 +4,7 @@ import { exists, mkdir, rm, readFile, writeFile } from "node:fs/promises";
 import { Effect, type Scope } from "effect";
 import plugin from "../src/plugin.ts";
 import type { Plugin } from "@opencode/plugin/effect";
-import { detectAurelia, detectOptionalSkills, install } from "../src/installer.ts";
+import { detectAurelia, detectOptionalSkills, install, optionalSkillProbeRoots } from "../src/installer.ts";
 import { snapshotDirectory } from "./snapshot.ts";
 import {
   SANDBOX_GLOBAL_BASE,
@@ -12,6 +12,11 @@ import {
   withGlobalSandbox,
   writeGlobalPluginConfig,
 } from "./global-sandbox.ts";
+import {
+  expectRegistrationBackfilled,
+  readRecordedManifest,
+  seedNullRegistration,
+} from "./registration-fixture.ts";
 
 interface PluginDefinition {
   readonly id: string;
@@ -717,20 +722,12 @@ describe("load-time manifest registration back-fill", () => {
       const manifestPath = join(SANDBOX_GLOBAL_BASE, `${PACKAGE_NAME}.manifest.json`);
 
       await invokeLoadCycle("backfill-install", fixtureDir);
-      const seeded = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
-      await writeFile(manifestPath, JSON.stringify({ ...seeded, entry: null, configPath: null }, null, 2));
-      const before = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
+      const before = await seedNullRegistration(manifestPath);
 
       await invokeLoadCycle("backfill-heal", fixtureDir);
 
-      const healed = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
-      expect(healed["entry"]).toBe(CANONICAL_PLUGIN_REF);
-      expect(healed["configPath"]).toBe(configPath);
-      // no other manifest fields change
-      expect(healed["version"]).toBe(before["version"]);
-      expect(healed["mode"]).toBe(before["mode"]);
-      expect(healed["files"]).toEqual(before["files"]);
-      expect(healed["optionalDependencies"]).toEqual(before["optionalDependencies"]);
+      const healed = await readRecordedManifest(manifestPath);
+      expectRegistrationBackfilled(healed, before, { entry: CANONICAL_PLUGIN_REF, configPath });
       expect(await readFile(configPath, "utf-8")).toBe(configContent);
     });
   });
@@ -743,8 +740,7 @@ describe("load-time manifest registration back-fill", () => {
       const manifestPath = join(SANDBOX_GLOBAL_BASE, `${PACKAGE_NAME}.manifest.json`);
 
       await invokeLoadCycle("steady-backfill-1", fixtureDir);
-      const seeded = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
-      await writeFile(manifestPath, JSON.stringify({ ...seeded, entry: null, configPath: null }, null, 2));
+      await seedNullRegistration(manifestPath);
       await invokeLoadCycle("steady-backfill-2", fixtureDir);
       const globalBefore = await snapshotDirectory(SANDBOX_GLOBAL_BASE);
       const repoBefore = await snapshotDirectory(fixtureDir);
@@ -938,6 +934,17 @@ describe("detectAurelia", () => {
     expect(result.message).not.toMatch(/framework-agnostic/);
     expect(result.message).toMatch(/VCS-agnostic/);
     expect(result.message).toMatch(/language agnostic/);
+  });
+});
+
+describe("optionalSkillProbeRoots", () => {
+  test("probes the config base's skills root once when it is also an extra root", () => {
+    const configBase = join("/home", "user", ".config", "opencode");
+    const agentSkills = join("/home", "user", ".agents", "skills");
+
+    const roots = optionalSkillProbeRoots(configBase, [join(configBase, "skills"), agentSkills]);
+
+    expect(roots).toEqual([join(configBase, "skills"), agentSkills]);
   });
 });
 
