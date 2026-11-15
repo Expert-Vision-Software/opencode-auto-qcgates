@@ -3,11 +3,14 @@ import { homedir } from "node:os";
 import { dirname, join, basename } from "node:path";
 import { PluginNameNormalizer } from "./plugin-name.ts";
 import { PluginEntryResolver, type ConfigPluginEntry } from "./plugin-entry.ts";
-import { InstallManifest, type InstallMode, type ManifestFileEntry } from "./manifest.ts";
+import { InstallManifest, type InstallMode, type ManifestFileEntry, type RecordedRegistration } from "./manifest.ts";
 import {
+  declineOptionalDependencies,
   loadPackageManifest,
   mergeOptionalDependencies,
   PACKAGE_MANIFEST_RELPATH,
+  uniqueOptionalDependencyIds,
+  unknownOptionalDependencyIds,
   type ExternalSkillSource,
   type PackageOptionalDep,
 } from "./optional-deps.ts";
@@ -16,6 +19,7 @@ import { legacyPluginKeyAdvisor } from "./legacy-config-advisory.ts";
 import { CacheCleaner, type CacheOutcome } from "./cache-cleaner.ts";
 import { BundledAssetsMissingError } from "./bundled-assets-missing-error.ts";
 import { CopyModeUnsupportedError } from "./copy-mode-unsupported-error.ts";
+import { UnknownOptionalDependencyError } from "./unknown-optional-dependency-error.ts";
 
 export type Scope = "local" | "global";
 export type { InstallMode } from "./manifest.ts";
@@ -24,6 +28,7 @@ export interface InstallOptions {
   addPluginConfig: boolean;
   migrateRootConfig: boolean;
   force: boolean;
+  declineOptional: readonly string[];
 }
 
 export type RootConfigConflictHandler = (
@@ -484,24 +489,22 @@ export async function isPluginInConfigBase(
   return (await scanConfigBase(configBase, packageName)).registered;
 }
 
-async function registeredPluginConfigPath(
-  configBase: string,
-  packageName: string
-): Promise<string | null> {
-  return (await scanConfigBase(configBase, packageName)).registeredConfigPath;
-}
-
 async function backfillRecordedRegistration(
   configBase: string,
   packageName: string,
-  entry: string | null,
-  configPath: string | null
-): Promise<{ entry: string | null; configPath: string | null }> {
-  const detectedConfigPath = await registeredPluginConfigPath(configBase, packageName);
-  if (detectedConfigPath === null) {
-    return { entry, configPath };
+  registration: RecordedRegistration
+): Promise<RecordedRegistration> {
+  if (registration.entry !== null && registration.configPath !== null) {
+    return registration;
   }
-  return { entry: entry ?? packageName, configPath: configPath ?? detectedConfigPath };
+  const detectedConfigPath = (await scanConfigBase(configBase, packageName)).registeredConfigPath;
+  if (detectedConfigPath === null) {
+    return registration;
+  }
+  return {
+    entry: registration.entry ?? PluginNameNormalizer.canonicalize(packageName),
+    configPath: registration.configPath ?? detectedConfigPath,
+  };
 }
 
 function candidateConfigPaths(configBase: string): string[] {
@@ -622,10 +625,37 @@ export async function install(
   const mode = await resolveMode(requestedMode);
   const pkgDir = await resolvePackageDir(packageName, packageVersion, cacheRoot, packageDir);
 
-  const { addPluginConfig, migrateRootConfig: allowRootMigration, force } = options;
+  const { addPluginConfig, migrateRootConfig: allowRootMigration, force, declineOptional } = options;
 
   const configBase = scope === "global" ? getGlobalConfigPath() : getLocalConfigPath(projectDir);
   const manifestPath = join(configBase, `${packageName}.manifest.json`);
+
+  const manifest = await InstallManifest.read(manifestPath);
+  const sameVersion = manifest.matchesVersion(packageVersion);
+
+  const pkgManifest = await loadPackageManifest(pkgDir);
+  let declaredDeps: PackageOptionalDep[] = [];
+  let effectiveDeclines = declineOptional;
+  if (!pkgManifest.ok) {
+    console.warn(
+      `[${packageName}] Ignoring invalid ${PACKAGE_MANIFEST_RELPATH}: ${pkgManifest.errors.join("; ")}`
+    );
+    if (declineOptional.length > 0) {
+      console.warn(
+        `[${packageName}] Ignoring --decline-optional ${declineOptional.join(", ")}: the package ` +
+          `manifest is invalid, so optional dependency ids cannot be validated.`
+      );
+      effectiveDeclines = [];
+    }
+  } else {
+    declaredDeps = pkgManifest.manifest.optionalDependencies;
+  }
+
+  const knownDepIds = uniqueOptionalDependencyIds(declaredDeps, manifest.optionalDependencies);
+  const unknownDeclines = unknownOptionalDependencyIds(effectiveDeclines, knownDepIds);
+  if (unknownDeclines.length > 0) {
+    throw new UnknownOptionalDependencyError(unknownDeclines, knownDepIds);
+  }
 
   let migrated = false;
 
@@ -633,8 +663,6 @@ export async function install(
     migrated = await migrateRootConfig(projectDir, { enabled: true });
   }
 
-  const manifest = await InstallManifest.read(manifestPath);
-  const sameVersion = manifest.matchesVersion(packageVersion);
   const plannedFiles = await collectAssetFiles(pkgDir);
 
   if (plannedFiles.length === 0) {
@@ -680,8 +708,7 @@ export async function install(
   const action: InstallAction =
     writtenRelativePaths.length === 0 ? "noop" : manifest.hasContents() ? "upgraded" : "installed";
 
-  let entry = manifest.entry;
-  let configPath = manifest.configPath;
+  let registration: RecordedRegistration = manifest.registration;
   let pluginAdded = false;
 
   if (addPluginConfig && mode === "plugin") {
@@ -690,33 +717,31 @@ export async function install(
       console.warn(`[${packageName}] ${outcome.warning}`);
     }
     if (outcome.action !== "blocked") {
-      entry = PluginNameNormalizer.canonicalize(packageName);
-      configPath = outcome.configPath;
+      registration = {
+        entry: PluginNameNormalizer.canonicalize(packageName),
+        configPath: outcome.configPath,
+      };
       pluginAdded = outcome.action === "updated" || outcome.action === "created";
     }
-  } else if (mode === "plugin" && (entry === null || configPath === null)) {
-    const backfilled = await backfillRecordedRegistration(configBase, packageName, entry, configPath);
-    entry = backfilled.entry;
-    configPath = backfilled.configPath;
   }
 
-  const pkgManifest = await loadPackageManifest(pkgDir);
-  let declaredDeps: PackageOptionalDep[] = [];
-  if (!pkgManifest.ok) {
-    console.warn(
-      `[${packageName}] Ignoring invalid ${PACKAGE_MANIFEST_RELPATH}: ${pkgManifest.errors.join("; ")}`
-    );
-  } else {
-    declaredDeps = pkgManifest.manifest.optionalDependencies;
+  if (mode === "plugin") {
+    registration = await backfillRecordedRegistration(configBase, packageName, registration);
   }
+
   const depMerge = mergeOptionalDependencies(manifest.optionalDependencies, declaredDeps);
+  const declined = declineOptionalDependencies(depMerge.dependencies, effectiveDeclines);
+  const dependencies = declined.dependencies;
+  const dependenciesChanged = depMerge.changed || declined.changed;
 
   const registrationRecorded =
-    manifest.mode === mode && manifest.entry === entry && manifest.configPath === configPath;
+    manifest.mode === mode &&
+    manifest.entry === registration.entry &&
+    manifest.configPath === registration.configPath;
   const shouldWriteManifest =
     recordedFiles.length > 0 &&
     (writtenRelativePaths.length > 0 ||
-      depMerge.changed ||
+      dependenciesChanged ||
       pluginAdded ||
       !manifest.hasContents() ||
       !registrationRecorded);
@@ -730,10 +755,9 @@ export async function install(
       manifestPath,
       packageVersion,
       filesToRecord,
-      depMerge.dependencies,
+      dependencies,
       mode,
-      entry,
-      configPath
+      registration
     );
   }
 
@@ -751,9 +775,9 @@ export async function install(
     mode,
     skillPaths: writtenSkillDirs(configBase, writtenRelativePaths),
     commandPaths: writtenCommandFiles(configBase, writtenRelativePaths),
-    configPath,
+    configPath: registration.configPath,
     manifestPath,
-    entry,
+    entry: registration.entry,
     skipped,
     migrated,
     pluginAdded,
@@ -959,7 +983,7 @@ export async function detectOptionalSkills(
       .filter(dep => dep.state === "declined")
       .map(dep => dep.id)
   );
-  const optionalSkillRoots = [join(configBase, "skills"), ...extraSkillsRoots];
+  const optionalSkillRoots = optionalSkillProbeRoots(configBase, extraSkillsRoots);
 
   for (const dep of pkgManifest.manifest.optionalDependencies) {
     if (dep.kind !== "skill" || !isExternalSkill(dep)) {
@@ -980,6 +1004,13 @@ export async function detectOptionalSkills(
 
 function defaultExtraSkillsRoots(): readonly string[] {
   return [join(getGlobalConfigPath(), "skills"), join(homedir(), ".agents", "skills")];
+}
+
+function optionalSkillProbeRoots(
+  configBase: string,
+  extraSkillsRoots: readonly string[]
+): string[] {
+  return [...new Set([join(configBase, "skills"), ...extraSkillsRoots])];
 }
 
 async function anyExists(paths: readonly string[]): Promise<boolean> {

@@ -12,6 +12,12 @@ import {
   withGlobalSandbox,
   writeGlobalPluginConfig,
 } from "./global-sandbox.ts";
+import { installOptions } from "./install-options-fixture.ts";
+import {
+  expectRegistrationBackfilled,
+  readRecordedManifest,
+  seedNullRegistration,
+} from "./registration-fixture.ts";
 
 interface PluginDefinition {
   readonly id: string;
@@ -21,6 +27,7 @@ interface PluginDefinition {
 const TEST_DIR = join(import.meta.dirname, ".test-temp");
 process.env.XDG_CACHE_HOME = join(import.meta.dirname, ".test-xdg-cache");
 const PACKAGE_NAME = "opencode-auto-qcgates";
+const CANONICAL_PLUGIN_REF = `${PACKAGE_NAME}@latest`;
 
 beforeAll(async () => {
   await rm(TEST_DIR, { recursive: true }).catch(() => {});
@@ -559,7 +566,7 @@ const REPRO_SCENARIOS: ReproScenario[] = [
         join(localDir, "opencode.json"),
         JSON.stringify({ $schema: "https://opencode.ai/config.json", plugins: ["opencode-auto-qcgates"] }, null, 2)
       );
-      await install("local", dir, { addPluginConfig: false, migrateRootConfig: false, force: false });
+      await install("local", dir, installOptions());
     },
   },
 ];
@@ -654,7 +661,7 @@ describe("install advisory (one-shot)", () => {
         join(localDir, "opencode.json"),
         JSON.stringify({ $schema: "https://opencode.ai/config.json", plugins: ["opencode-architect"] }, null, 2)
       );
-      await install("local", fixtureDir, { addPluginConfig: false, migrateRootConfig: false, force: false });
+      await install("local", fixtureDir, installOptions());
 
       const { warnings, restore } = captureConsoleWarnings();
       const before = await snapshotDirectory(fixtureDir);
@@ -716,20 +723,12 @@ describe("load-time manifest registration back-fill", () => {
       const manifestPath = join(SANDBOX_GLOBAL_BASE, `${PACKAGE_NAME}.manifest.json`);
 
       await invokeLoadCycle("backfill-install", fixtureDir);
-      const seeded = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
-      await writeFile(manifestPath, JSON.stringify({ ...seeded, entry: null, configPath: null }, null, 2));
-      const before = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
+      const before = await seedNullRegistration(manifestPath);
 
       await invokeLoadCycle("backfill-heal", fixtureDir);
 
-      const healed = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
-      expect(healed["entry"]).toBe(PACKAGE_NAME);
-      expect(healed["configPath"]).toBe(configPath);
-      // no other manifest fields change
-      expect(healed["version"]).toBe(before["version"]);
-      expect(healed["mode"]).toBe(before["mode"]);
-      expect(healed["files"]).toEqual(before["files"]);
-      expect(healed["optionalDependencies"]).toEqual(before["optionalDependencies"]);
+      const healed = await readRecordedManifest(manifestPath);
+      expectRegistrationBackfilled(healed, before, { entry: CANONICAL_PLUGIN_REF, configPath });
       expect(await readFile(configPath, "utf-8")).toBe(configContent);
     });
   });
@@ -742,8 +741,7 @@ describe("load-time manifest registration back-fill", () => {
       const manifestPath = join(SANDBOX_GLOBAL_BASE, `${PACKAGE_NAME}.manifest.json`);
 
       await invokeLoadCycle("steady-backfill-1", fixtureDir);
-      const seeded = JSON.parse(await readFile(manifestPath, "utf-8")) as Record<string, unknown>;
-      await writeFile(manifestPath, JSON.stringify({ ...seeded, entry: null, configPath: null }, null, 2));
+      await seedNullRegistration(manifestPath);
       await invokeLoadCycle("steady-backfill-2", fixtureDir);
       const globalBefore = await snapshotDirectory(SANDBOX_GLOBAL_BASE);
       const repoBefore = await snapshotDirectory(fixtureDir);
@@ -959,6 +957,33 @@ describe("detectOptionalSkills", () => {
     await writeFile(join(configBase, "skills", "grilling", "SKILL.md"), "---\nname: grilling\n---\n");
 
     const recs = await detectOptionalSkills(configBase, undefined, []);
+    expect(recs).toEqual([]);
+  });
+
+  test("recommends once when the config base's skills root also appears as an extra root", async () => {
+    const configBase = join(fixturesRoot, "overlapping-roots");
+    await rm(configBase, { recursive: true }).catch(() => {});
+    await mkdir(configBase, { recursive: true });
+
+    const overlappingRoots = [join(configBase, "skills"), join(configBase, "skills")];
+
+    const missing = await detectOptionalSkills(configBase, undefined, overlappingRoots);
+    expect(missing).toHaveLength(1);
+    expect(missing[0]).toContain("grilling");
+
+    await mkdir(join(configBase, "skills", "grilling"), { recursive: true });
+    await writeFile(join(configBase, "skills", "grilling", "SKILL.md"), "---\nname: grilling\n---\n");
+
+    expect(await detectOptionalSkills(configBase, undefined, overlappingRoots)).toEqual([]);
+  });
+
+  test("returns empty array when the config base is itself the global skills root", async () => {
+    const configBase = join(fixturesRoot, "config-base-is-global");
+    await rm(configBase, { recursive: true }).catch(() => {});
+    await mkdir(join(configBase, "skills", "grilling"), { recursive: true });
+    await writeFile(join(configBase, "skills", "grilling", "SKILL.md"), "---\nname: grilling\n---\n");
+
+    const recs = await detectOptionalSkills(configBase, undefined, [join(configBase, "skills")]);
     expect(recs).toEqual([]);
   });
 

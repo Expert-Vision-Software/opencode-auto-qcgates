@@ -204,6 +204,50 @@ export interface OptionalDepMergeResult {
   changed: boolean;
 }
 
+export function uniqueOptionalDependencyIds(
+  declared: readonly PackageOptionalDep[],
+  recorded: readonly InstallOptionalDep[]
+): readonly string[] {
+  const known = new Set<string>();
+  const ids: string[] = [];
+  for (const entry of [...declared, ...recorded]) {
+    if (known.has(entry.id)) {
+      continue;
+    }
+    known.add(entry.id);
+    ids.push(entry.id);
+  }
+  return ids;
+}
+
+export function unknownOptionalDependencyIds(
+  requested: readonly string[],
+  knownIds: readonly string[]
+): string[] {
+  const known = new Set(knownIds);
+  const unknown: string[] = [];
+  for (const id of requested) {
+    if (!known.has(id) && !unknown.includes(id)) {
+      unknown.push(id);
+    }
+  }
+  return unknown;
+}
+
+export function declineOptionalDependencies(
+  dependencies: readonly InstallOptionalDep[],
+  declinedIds: readonly string[]
+): OptionalDepMergeResult {
+  const requested = new Set(declinedIds);
+  const changed = dependencies.some(entry => requested.has(entry.id) && entry.state !== "declined");
+  return {
+    dependencies: dependencies.map(entry =>
+      requested.has(entry.id) ? { ...entry, state: "declined" as const } : entry
+    ),
+    changed,
+  };
+}
+
 export function mergeOptionalDependencies(
   existing: InstallOptionalDep[] | undefined,
   declared: PackageOptionalDep[]

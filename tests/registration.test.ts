@@ -6,6 +6,7 @@ import { RegistrationDetector, type RegistrationContext } from "../src/registrat
 import { install } from "../src/installer.ts";
 import { snapshotDirectory } from "./snapshot.ts";
 import { SANDBOX_GLOBAL_BASE, resetGlobalConfig, withGlobalSandbox, writeGlobalPluginConfig } from "./global-sandbox.ts";
+import { INSTALL_OPTIONS } from "./install-options-fixture.ts";
 
 const TEST_DIR = join(import.meta.dirname, ".test-registration");
 process.env.XDG_CACHE_HOME = join(import.meta.dirname, ".test-xdg-cache");
@@ -325,7 +326,6 @@ describe("RegistrationDetector.scopesToEnsure", () => {
 });
 
 describe("RegistrationDetector.hasAnyInstallation", () => {
-  const INSTALL_OPTIONS = { addPluginConfig: false, migrateRootConfig: false, force: false } as const;
 
   test("returns false when nothing is installed in any scope", async () => {
     await withGlobalSandbox(async () => {
