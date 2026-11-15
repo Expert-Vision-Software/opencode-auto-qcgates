@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-11-14
+
 ### Added
 - **`install --decline-optional <id>` records an intentional omission** — the CLI can now write `state: "declined"` for a named optional dependency (repeatable flag), so opting out of `grilling` no longer requires hand-editing `.opencode/opencode-auto-qcgates.manifest.json`. The ids are validated before any asset copy or manifest write: an unknown id fails with an error naming the ids that can be declined and leaves the target directory byte-for-byte unchanged. Every other dependency field and state is preserved, and `detectOptionalSkills` already suppresses declined entries. The load-time self-ensure passes no ids and behaves exactly as before. (fixes #21)
 
